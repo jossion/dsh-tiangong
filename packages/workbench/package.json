@@ -1,0 +1,23 @@
+{
+  "name": "@jos/workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Workbench: company operations management and requirement-driven software delivery workflows.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": ["locale/*.json"],
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+- insert:
+    - id: workbench
+      name: '@jos/workbench'
+      config:
+        dataDir: ''
