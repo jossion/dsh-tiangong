@@ -15,34 +15,18 @@
  * still activates in a profile that lacks them.
  */
 import { homedir } from 'node:os'
-import { dirname, join, isAbsolute } from 'node:path'
-import { appendFileSync, mkdirSync } from 'node:fs'
+import { join, isAbsolute } from 'node:path'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog } from './events.js'
 
 export const inject = ['llm', 'tools']
 
-/**
- * TEMPORARY activation canary. The host half has never shown a single trace of
- * running, so every step of activation appends one line here until we know
- * exactly where it stops. Remove once the route is confirmed live.
- */
-const BOOT_LOG = join(homedir(), '.dsh', 'workbench', 'boot.log')
-function canary(line) {
-  try {
-    mkdirSync(dirname(BOOT_LOG), { recursive: true })
-    appendFileSync(BOOT_LOG, `${new Date().toISOString()} ${line}\n`)
-  } catch {
-    /* diagnostics must never break activation */
-  }
-}
-canary('--- module imported ---')
-
 const DEFAULTS = {
   dataDir: '',
-  provider: 'deepseek',
-  model: 'deepseek-chat',
+  // Empty means "whatever this profile serves" — see resolveRoute().
+  provider: '',
+  model: '',
 }
 
 /** The panel reads this. GET only: nothing reachable here starts work. */
@@ -64,10 +48,6 @@ function sendJson(response, status, value) {
 }
 
 export function apply(ctx, row) {
-  canary(`apply() entered | inject=${JSON.stringify(inject)}`
-    + ` | ctx.inject=${typeof ctx.inject} ctx.effect=${typeof ctx.effect}`
-    + ` ctx.get=${typeof ctx.get} ctx.on=${typeof ctx.on} ctx.tools=${typeof ctx.tools}`)
-  try {
   const config = { ...DEFAULTS, ...(row ?? {}) }
   if (!isAbsolute(config.dataDir)) {
     config.dataDir = resolveDataDir(config.dataDir)
@@ -94,7 +74,11 @@ export function apply(ctx, row) {
   // plugin's public surface.
 
   // Read-only state route for the panel.
-  let mounted = false
+  //
+  // It rides a `webServer` sub-fiber rather than a one-shot `ctx.get` during
+  // `apply`: loader entries settle concurrently, so a service that is absent
+  // at apply time can be present a moment later. A headless profile simply
+  // never activates this fiber and still writes events.
   const route = {
     kind: 'exact',
     path: STATE_PATH,
@@ -106,6 +90,7 @@ export function apply(ctx, row) {
       try {
         const summary = await events.summary()
         const recent = await events.tail(30)
+        // Newest first is what the stream renders; the file stays oldest-first.
         sendJson(response, 200, { summary, events: recent.reverse() })
       } catch (error) {
         sendJson(response, 500, {
@@ -115,53 +100,22 @@ export function apply(ctx, row) {
     },
   }
 
-  function mount(webServer, source) {
-    if (mounted) return () => {}
-    if (!webServer || typeof webServer.register !== 'function') {
-      canary(`mount(${source}): no usable webServer`)
-      return () => {}
-    }
-    try {
-      const dispose = webServer.register(route)
-      mounted = true
-      canary(`mount(${source}): ROUTE REGISTERED ${STATE_PATH}`)
-      return () => {
-        mounted = false
-        try { dispose?.() } catch { /* withdrawn */ }
+  ctx.inject(['webServer'], webCtx => {
+    webCtx.effect(() => {
+      const webServer = webCtx.get('webServer')
+      if (!webServer || typeof webServer.register !== 'function') {
+        return () => {}
       }
-    } catch (error) {
-      canary(`mount(${source}): THREW ${error?.stack ?? error}`)
-      return () => {}
-    }
-  }
-
-  try {
-    const early = ctx.get('webServer')
-    canary(`apply-time ctx.get('webServer') -> ${early === undefined ? 'undefined' : typeof early}`)
-    if (early !== undefined) ctx.effect(() => mount(early, 'apply-time'))
-  } catch (error) {
-    canary(`apply-time ctx.get threw: ${error?.message ?? error}`)
-  }
-
-  try {
-    ctx.inject(['webServer'], webCtx => {
-      canary('inject callback FIRED')
-      webCtx.effect(() => {
-        canary(`inject effect running | webCtx.get=${typeof webCtx.get}`)
-        let server
+      const dispose = webServer.register(route)
+      return () => {
         try {
-          server = webCtx.get('webServer')
-        } catch (error) {
-          canary(`inject inner get threw: ${error?.message ?? error}`)
-          return () => {}
+          dispose?.()
+        } catch {
+          /* already withdrawn */
         }
-        return mount(server, 'inject')
-      }, 'workbench: state route')
-    })
-    canary('ctx.inject() returned')
-  } catch (error) {
-    canary(`ctx.inject threw: ${error?.stack ?? error}`)
-  }
+      }
+    }, 'workbench: state route')
+  })
 
   // One tool so the agent can drive delivery from an ordinary conversation,
   // which is how a non-technical owner will actually reach it.
@@ -204,9 +158,4 @@ export function apply(ctx, row) {
       },
     }),
   )
-
-  } catch (error) {
-    canary(`apply() THREW: ${error?.stack ?? error}`)
-    throw error
-  }
 }

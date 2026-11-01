@@ -52,9 +52,42 @@ ln -sfn "$PWD/packages/workbench" ~/.dsh/profiles/desktop/node_modules/@jos/work
 | `GET /workbench/state` 只读投影路由 | ✅ 已完成 |
 | 面板「决策」页（计数 / 泳道分流 / 决策流 / 等你决定） | ✅ 已完成 |
 | 规划流程发决策事件 | ✅ 已完成（4 个决策点） |
+| 端到端首跑（真模型调用） | ✅ 4 条决策 / 4 角色 / 19 工作项 |
 | code 泳道真执行（git / 测试 / diff） | ⬜ P1 |
 | 面板内人工审批（点按钮批准） | ⬜ P1 |
 | 真实成本记账（token → USD） | ⬜ P2 |
 | 人员管理 / 财务管理 | ⚠️ 骨架，数据通道未接 |
 
 设计与取舍见 [docs/agent-workflow-design.md](docs/agent-workflow-design.md)。
+
+## 已经踩过的坑（别再踩）
+
+这四个都是「代码看着对、但从没被执行过」类型的 bug，全部在第一次真正激活/运行时才暴露：
+
+1. **`ctx.tools.register` 必须声明 `output`**
+   缺了它直接抛 `TypeError`，而抛错会**掀掉整个插件 fiber**——不是局部失败，是激活失败。
+   最小写法：`output: { schema: { type: 'string' }, render: (_a, v) => [{ type: 'text', text: String(v) }] }`
+   本插件正是因此从安装到 2026-11-01 一直没激活过。
+
+2. **`webServer` 要用 `ctx.inject(['webServer'], cb)` 子 fiber**
+   在 `apply` 里一次性 `ctx.get('webServer')` 拿到的是 `undefined`（loader 条目并发收敛），
+   于是路由被**静默跳过**：面板能渲染，fetch 全 404。
+
+3. **`ctx.llm.stream` 的 messages 是块数组**
+   `content: [{ type: 'text', text }]`，不是字符串；`system` 不是 stream 的选项。
+   模型路由也别硬编码 `deepseek/deepseek-chat`——用 `resolveRoute()`：配置的路由 → profile 默认 → 第一个可用模型。
+
+4. **变量遮蔽**
+   `const record = await store.add(...)` 会和同名的 `record()` 函数冲突，
+   报 `record is not a function`。决策出口统一叫 `emitDecision()`。
+
+## 数据落在哪
+
+```
+~/.dsh/workbench/
+├── events.jsonl            决策日志，一行一个决策（唯一真相）
+└── deliveries/<runId>/     每次规划的产物
+    ├── roles.json
+    ├── design.json
+    └── review.json
+```
