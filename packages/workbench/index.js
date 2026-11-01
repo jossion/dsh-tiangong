@@ -15,12 +15,29 @@
  * still activates in a profile that lacks them.
  */
 import { homedir } from 'node:os'
-import { join, isAbsolute } from 'node:path'
+import { dirname, join, isAbsolute } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog } from './events.js'
 
 export const inject = ['llm', 'tools']
+
+/**
+ * TEMPORARY activation canary. The host half has never shown a single trace of
+ * running, so every step of activation appends one line here until we know
+ * exactly where it stops. Remove once the route is confirmed live.
+ */
+const BOOT_LOG = join(homedir(), '.dsh', 'workbench', 'boot.log')
+function canary(line) {
+  try {
+    mkdirSync(dirname(BOOT_LOG), { recursive: true })
+    appendFileSync(BOOT_LOG, `${new Date().toISOString()} ${line}\n`)
+  } catch {
+    /* diagnostics must never break activation */
+  }
+}
+canary('--- module imported ---')
 
 const DEFAULTS = {
   dataDir: '',
@@ -47,6 +64,10 @@ function sendJson(response, status, value) {
 }
 
 export function apply(ctx, row) {
+  canary(`apply() entered | inject=${JSON.stringify(inject)}`
+    + ` | ctx.inject=${typeof ctx.inject} ctx.effect=${typeof ctx.effect}`
+    + ` ctx.get=${typeof ctx.get} ctx.on=${typeof ctx.on} ctx.tools=${typeof ctx.tools}`)
+  try {
   const config = { ...DEFAULTS, ...(row ?? {}) }
   if (!isAbsolute(config.dataDir)) {
     config.dataDir = resolveDataDir(config.dataDir)
@@ -73,53 +94,81 @@ export function apply(ctx, row) {
   // plugin's public surface.
 
   // Read-only state route for the panel.
-  //
-  // It rides a `webServer` sub-fiber instead of a one-shot `ctx.get` at apply
-  // time: loader entries settle concurrently, so reading the service during
-  // `apply` silently skips the mount whenever the web server activates after
-  // this plugin. That was the first bug here — the panel loaded fine and every
-  // fetch 404'd. A headless profile never activates this fiber and still writes
-  // events, it just cannot be watched live.
-  ctx.inject(['webServer'], webCtx => {
-    webCtx.effect(() => {
-      const webServer = webCtx.get('webServer')
-      if (!webServer || typeof webServer.register !== 'function') {
-        return () => {}
+  let mounted = false
+  const route = {
+    kind: 'exact',
+    path: STATE_PATH,
+    handler: async (request, response) => {
+      if (request.method !== 'GET' && request.method !== 'HEAD') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+        return
       }
+      try {
+        const summary = await events.summary()
+        const recent = await events.tail(30)
+        sendJson(response, 200, { summary, events: recent.reverse() })
+      } catch (error) {
+        sendJson(response, 500, {
+          error: { code: 'state-unavailable', message: String(error?.message ?? error) },
+        })
+      }
+    },
+  }
 
-      const dispose = webServer.register({
-        kind: 'exact',
-        path: STATE_PATH,
-        handler: async (request, response) => {
-          if (request.method !== 'GET' && request.method !== 'HEAD') {
-            sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-            return
-          }
-          try {
-            const summary = await events.summary()
-            const recent = await events.tail(30)
-            // Newest first is what the stream renders; the file stays oldest-first.
-            sendJson(response, 200, { summary, events: recent.reverse() })
-          } catch (error) {
-            sendJson(response, 500, {
-              error: { code: 'state-unavailable', message: String(error?.message ?? error) },
-            })
-          }
-        },
-      })
-
+  function mount(webServer, source) {
+    if (mounted) return () => {}
+    if (!webServer || typeof webServer.register !== 'function') {
+      canary(`mount(${source}): no usable webServer`)
+      return () => {}
+    }
+    try {
+      const dispose = webServer.register(route)
+      mounted = true
+      canary(`mount(${source}): ROUTE REGISTERED ${STATE_PATH}`)
       return () => {
-        try {
-          dispose?.()
-        } catch {
-          /* already withdrawn */
-        }
+        mounted = false
+        try { dispose?.() } catch { /* withdrawn */ }
       }
-    }, 'workbench: state route')
-  })
+    } catch (error) {
+      canary(`mount(${source}): THREW ${error?.stack ?? error}`)
+      return () => {}
+    }
+  }
+
+  try {
+    const early = ctx.get('webServer')
+    canary(`apply-time ctx.get('webServer') -> ${early === undefined ? 'undefined' : typeof early}`)
+    if (early !== undefined) ctx.effect(() => mount(early, 'apply-time'))
+  } catch (error) {
+    canary(`apply-time ctx.get threw: ${error?.message ?? error}`)
+  }
+
+  try {
+    ctx.inject(['webServer'], webCtx => {
+      canary('inject callback FIRED')
+      webCtx.effect(() => {
+        canary(`inject effect running | webCtx.get=${typeof webCtx.get}`)
+        let server
+        try {
+          server = webCtx.get('webServer')
+        } catch (error) {
+          canary(`inject inner get threw: ${error?.message ?? error}`)
+          return () => {}
+        }
+        return mount(server, 'inject')
+      }, 'workbench: state route')
+    })
+    canary('ctx.inject() returned')
+  } catch (error) {
+    canary(`ctx.inject threw: ${error?.stack ?? error}`)
+  }
 
   // One tool so the agent can drive delivery from an ordinary conversation,
   // which is how a non-technical owner will actually reach it.
+  //
+  // `output` is not optional: without it `ctx.tools.register` throws and the
+  // whole plugin fails to activate — which is exactly why this plugin never
+  // came up between its install and today.
   ctx.effect(() =>
     ctx.tools.register({
       name: 'workbench_plan_software',
@@ -138,25 +187,26 @@ export function apply(ctx, row) {
         },
         required: ['requirement'],
       },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: String(value) }],
+      },
       async execute(input) {
         const brief = String(input.requirement ?? '').trim()
-        if (!brief) {
-          return { isError: true, output: 'requirement must not be empty' }
-        }
-        try {
-          const result = await delivery.run({ brief })
-          return {
-            output: [
-              `Planned: ${brief}`,
-              `Roles: ${result.roles?.roles?.length ?? 0}`,
-              `Work items: ${result.design?.workItems?.length ?? 0}`,
-              `Artefacts: ${result.artifactDir ?? config.dataDir}`,
-            ].join('\n'),
-          }
-        } catch (err) {
-          return { isError: true, output: `delivery planning failed: ${err.message}` }
-        }
+        if (!brief) throw new Error('requirement must not be empty')
+        const result = await delivery.run({ brief })
+        return [
+          `Planned: ${brief}`,
+          `Roles: ${result.roles?.roles?.length ?? 0}`,
+          `Work items: ${result.design?.workItems?.length ?? 0}`,
+          `Artefacts: ${result.artifactDir ?? config.dataDir}`,
+        ].join('\n')
       },
     }),
   )
+
+  } catch (error) {
+    canary(`apply() THREW: ${error?.stack ?? error}`)
+    throw error
+  }
 }

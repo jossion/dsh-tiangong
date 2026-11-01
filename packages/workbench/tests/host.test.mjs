@@ -154,3 +154,19 @@ test('the route disappears when the plugin is disposed', async () => {
     assert.equal(response.status, 200)
   })
 })
+
+test('the agent tool declares the output contract the registry requires', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+
+    const tool = tools[0]
+    // Registering without `output` throws and takes the whole plugin down, so
+    // this is the contract that keeps activation from regressing.
+    assert.ok(tool.output, 'a tool without `output` fails registration')
+    assert.deepEqual(tool.output.schema, { type: 'string' })
+    assert.equal(typeof tool.output.render, 'function')
+    assert.deepEqual(tool.output.render({}, 'hello'), [{ type: 'text', text: 'hello' }])
+    assert.equal(typeof tool.execute, 'function')
+  })
+})
