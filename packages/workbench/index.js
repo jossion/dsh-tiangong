@@ -72,48 +72,50 @@ export function apply(ctx, row) {
   // delivery runner stay module-local; the tool and the route below are the
   // plugin's public surface.
 
-  // Read-only state route for the panel. Registered as an effect so it is
-  // withdrawn with the plugin, and skipped when the profile has no web server
-  // (a headless run still writes events, it just cannot be watched live).
-  ctx.effect(() => {
-    let webServer
-    try {
-      webServer = ctx.get('webServer')
-    } catch {
-      return () => {}
-    }
-    if (!webServer || typeof webServer.register !== 'function') {
-      return () => {}
-    }
-
-    const dispose = webServer.register({
-      kind: 'exact',
-      path: STATE_PATH,
-      handler: async (request, response) => {
-        if (request.method !== 'GET' && request.method !== 'HEAD') {
-          sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-          return
-        }
-        try {
-          const summary = await events.summary()
-          const recent = await events.tail(30)
-          // Newest first is what the stream renders; the file stays oldest-first.
-          sendJson(response, 200, { summary, events: recent.reverse() })
-        } catch (error) {
-          sendJson(response, 500, {
-            error: { code: 'state-unavailable', message: String(error?.message ?? error) },
-          })
-        }
-      },
-    })
-
-    return () => {
-      try {
-        dispose?.()
-      } catch {
-        /* already withdrawn */
+  // Read-only state route for the panel.
+  //
+  // It rides a `webServer` sub-fiber instead of a one-shot `ctx.get` at apply
+  // time: loader entries settle concurrently, so reading the service during
+  // `apply` silently skips the mount whenever the web server activates after
+  // this plugin. That was the first bug here — the panel loaded fine and every
+  // fetch 404'd. A headless profile never activates this fiber and still writes
+  // events, it just cannot be watched live.
+  ctx.inject(['webServer'], webCtx => {
+    webCtx.effect(() => {
+      const webServer = webCtx.get('webServer')
+      if (!webServer || typeof webServer.register !== 'function') {
+        return () => {}
       }
-    }
+
+      const dispose = webServer.register({
+        kind: 'exact',
+        path: STATE_PATH,
+        handler: async (request, response) => {
+          if (request.method !== 'GET' && request.method !== 'HEAD') {
+            sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+            return
+          }
+          try {
+            const summary = await events.summary()
+            const recent = await events.tail(30)
+            // Newest first is what the stream renders; the file stays oldest-first.
+            sendJson(response, 200, { summary, events: recent.reverse() })
+          } catch (error) {
+            sendJson(response, 500, {
+              error: { code: 'state-unavailable', message: String(error?.message ?? error) },
+            })
+          }
+        },
+      })
+
+      return () => {
+        try {
+          dispose?.()
+        } catch {
+          /* already withdrawn */
+        }
+      }
+    }, 'workbench: state route')
   })
 
   // One tool so the agent can drive delivery from an ordinary conversation,
