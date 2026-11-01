@@ -51,15 +51,70 @@ export function extractJson(text) {
 export async function collectText(stream) {
   let out = ''
   for await (const chunk of stream) {
-    if (chunk.type === 'text-delta') out += chunk.text
-    else if (chunk.type === 'block-end' && chunk.block && chunk.block.type === 'text') {
-      // block-end repeats the text; only use it when deltas were absent.
-      if (!out && typeof chunk.block.text === 'string') out = chunk.block.text
-    } else if (chunk.type === 'finish' && chunk.reason?.kind === 'error') {
-      throw new Error(`model call failed: ${chunk.reason.failure?.message ?? 'unknown'}`)
+    const type = chunk?.type
+    if (type === 'text-delta') {
+      const text = chunk.text ?? chunk.delta?.text
+      if (typeof text === 'string') out += text
+    } else if (type === 'block-end' && chunk.block?.type === 'text' && out === '') {
+      // block-end repeats the text; only use it when no deltas arrived.
+      if (typeof chunk.block.text === 'string') out = chunk.block.text
+    } else if (type === 'finish') {
+      const kind = chunk.reason?.kind ?? chunk.reason
+      if (kind === 'error') {
+        throw new Error(`model call failed: ${chunk.reason?.failure?.message ?? 'unknown'}`)
+      }
     }
   }
   return out
+}
+
+/**
+ * The model route this profile actually serves.
+ *
+ * A hardcoded provider name is why plugins work on one machine and not the
+ * next: `deepseek/deepseek-chat` exists in the docs, not necessarily in the
+ * profile. The configured route wins only when it resolves; otherwise the
+ * profile default the DSH UI shows is used, and finally the first served model.
+ */
+export async function resolveRoute(ctx, config = {}) {
+  if (config.provider && config.model) {
+    let info
+    try {
+      info = await ctx.llm.resolveModelInfo?.(config.provider, config.model)
+    } catch {
+      info = undefined
+    }
+    if (info !== undefined && info !== null) {
+      return { provider: config.provider, model: config.model }
+    }
+  }
+
+  try {
+    const selection = ctx.get?.('agentDefaultModel')?.currentSelection?.()
+    if (selection?.provider && selection?.model) {
+      return { provider: selection.provider, model: selection.model }
+    }
+  } catch {
+    /* the service is optional */
+  }
+
+  let providers = []
+  try {
+    providers = ctx.llm.listProviders?.() ?? []
+  } catch {
+    providers = []
+  }
+  for (const provider of providers) {
+    let models = []
+    try {
+      models = await ctx.llm.listModels?.(provider.id)
+    } catch {
+      models = []
+    }
+    if (models?.[0]) return { provider: provider.id, model: models[0].id }
+  }
+
+  throw new Error('workbench: this profile serves no model route')
 }
 
 const ROLE_PROMPT = `You are a senior software architect designing role-based access control for a small
@@ -174,15 +229,19 @@ Produce a JSON object and nothing else:
  * because a chatty model is the common failure rather than a bad request.
  */
 async function askJson(ctx, config, { system, prompt, signal }, attempt = 0) {
+  const route = await resolveRoute(ctx, config)
   const stream = ctx.llm.stream({
-    provider: config.provider,
-    model: config.model,
-    system,
-    messages: [{ role: 'user', content: prompt }],
+    ...route,
+    // Content is a block array, and the system text is folded into the single
+    // user message: the exact option set of `stream` is narrower than it looks.
+    messages: [{ role: 'user', content: [{ type: 'text', text: `${system}\n\n${prompt}` }] }],
     temperature: attempt === 0 ? 0.4 : 0,
     signal,
   })
   const text = await collectText(stream)
+  if (!text.trim()) {
+    throw new Error(`model returned no text (${route.provider}/${route.model})`)
+  }
   try {
     return extractJson(text)
   } catch (err) {
@@ -211,7 +270,7 @@ export function createDelivery({ ctx, config, store, onProgress, onDecision }) {
    * Records one decision. Never throws: an audit failure must not abort a
    * run, and the panel already degrades to "no data" on its own.
    */
-  async function record(event) {
+  async function emitDecision(event) {
     if (typeof onDecision !== 'function') return null
     try {
       return await onDecision(event)
@@ -235,7 +294,7 @@ export function createDelivery({ ctx, config, store, onProgress, onDecision }) {
     current = record.id
     // The first decision is routing: which capability handles this brief. The
     // route table has exactly one candidate, so it is mechanical, not a guess.
-    await record(decide('which_skill', {
+    await emitDecision(decide('which_skill', {
       runId: record.id,
       task: brief,
       value: 'workbench_plan_software',
@@ -295,7 +354,7 @@ export function createDelivery({ ctx, config, store, onProgress, onDecision }) {
       ? review.risks.filter(risk => risk?.severity === 'high').length
       : 0
 
-    await record(decide('ask_person', {
+    await emitDecision(decide('ask_person', {
       runId: id,
       task: brief,
       value: openQuestions > 0 ? 'yes' : 'no',
@@ -306,7 +365,7 @@ export function createDelivery({ ctx, config, store, onProgress, onDecision }) {
       evidence: { openQuestions, highRisks },
     }))
 
-    await record(decide('keep_result', {
+    await emitDecision(decide('keep_result', {
       runId: id,
       task: brief,
       value: highRisks > 0 ? 'hold' : 'keep',
@@ -325,7 +384,7 @@ export function createDelivery({ ctx, config, store, onProgress, onDecision }) {
 
     // "Done" means the artefacts exist on disk, not that the model says so.
     const workItems = Array.isArray(design.workItems) ? design.workItems.length : 0
-    await record(decide('is_done', {
+    await emitDecision(decide('is_done', {
       runId: id,
       task: brief,
       value: 'planned',
