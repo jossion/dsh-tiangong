@@ -8,6 +8,9 @@ window.__ModuleLoader__.load({
     const PANEL_KEY = 'workbench'
     const NS = 'workbench'
 
+    /** The host's read-only projection route (see `index.js` STATE_PATH). */
+    const STATE_URL = '/workbench/state'
+
     /**
      * Bilingual dictionaries, registered through ctx.locale so the panel
      * follows the active language instead of hard-coding one.
@@ -19,6 +22,23 @@ window.__ModuleLoader__.load({
         tabDelivery: 'Delivery',
         tabStaff: 'Staff',
         tabFinance: 'Finance',
+        tabDecisions: 'Decisions',
+        decisionsTitle: 'Decisions this shift',
+        decisionsOffline: 'No data yet — the host state route is not answering.',
+        statForks: 'forks',
+        statDecisions: 'decisions',
+        statHeld: 'held for you',
+        statSpent: 'spent',
+        laneCode: 'Code',
+        laneFrontier: 'AI',
+        laneHuman: 'You',
+        laneHintCode: 'exact rule, no model',
+        laneHintFrontier: 'back to frontier',
+        laneHintHuman: 'irreversible, never auto',
+        streamTitle: 'Decision stream',
+        waitingTitle: 'Held for you',
+        waitingEmpty: 'Nothing is waiting on a person.',
+        recentEmpty: 'No decisions recorded yet. Plan a system to produce some.',
         briefLabel: 'What do you want to build?',
         briefHint:
           'Describe it the way you would to a colleague, and say who will use it. The planner '
@@ -38,6 +58,23 @@ window.__ModuleLoader__.load({
         tabDelivery: '软件开发',
         tabStaff: '人员管理',
         tabFinance: '财务管理',
+        tabDecisions: '决策',
+        decisionsTitle: '本轮决策',
+        decisionsOffline: '还没有数据——host 的状态路由没有响应。',
+        statForks: '决策种类',
+        statDecisions: '决策数',
+        statHeld: '等你决定',
+        statSpent: '花费',
+        laneCode: '代码',
+        laneFrontier: 'AI',
+        laneHuman: '你',
+        laneHintCode: '精确规则，不调模型',
+        laneHintFrontier: '交回前沿模型',
+        laneHintHuman: '不可逆，永不自动',
+        streamTitle: '决策流',
+        waitingTitle: '等你决定',
+        waitingEmpty: '没有东西在等人。',
+        recentEmpty: '还没有记录到决策。先规划一个系统试试。',
         briefLabel: '你想做什么系统？',
         briefHint:
           '像跟同事描述一样把需求说清楚，并说明会有哪些人使用。工作流会自动设计角色、'
@@ -141,6 +178,91 @@ window.__ModuleLoader__.load({
         padding: '10px 0',
         borderBottom: '1px solid var(--dsw-alias-border-l1)',
       },
+      // Decision panel. Counts use tabular figures so a live refresh does not
+      // make the numbers jitter as they change width.
+      statRow: { display: 'flex', gap: '10px', flexWrap: 'wrap' },
+      stat: {
+        flex: '1 1 120px',
+        background: 'var(--dsw-alias-bg-layer-1)',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        borderRadius: '10px',
+        padding: '12px 14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+      },
+      statValue: {
+        fontSize: '22px',
+        fontWeight: 600,
+        color: 'var(--dsw-alias-label-primary)',
+        fontVariantNumeric: 'tabular-nums',
+      },
+      statLabel: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+      bar: {
+        display: 'flex',
+        width: '100%',
+        height: '10px',
+        borderRadius: '999px',
+        overflow: 'hidden',
+        background: 'var(--dsw-alias-border-l1)',
+      },
+      legend: { display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px' },
+      legendItem: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        color: 'var(--dsw-alias-label-secondary)',
+      },
+      dot: { width: '8px', height: '8px', borderRadius: '999px', display: 'inline-block' },
+      sectionTitle: { margin: 0, fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+      streamRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '8px 0',
+        borderBottom: '1px solid var(--dsw-alias-border-l1)',
+        fontSize: '13px',
+      },
+      streamName: {
+        flex: '0 0 128px',
+        color: 'var(--dsw-alias-label-primary)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      streamValue: {
+        flex: '1 1 auto',
+        color: 'var(--dsw-alias-label-secondary)',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      confBar: {
+        position: 'relative',
+        flex: '0 0 64px',
+        height: '4px',
+        borderRadius: '999px',
+        background: 'var(--dsw-alias-border-l1)',
+      },
+      confFill: { position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: '999px' },
+      confText: {
+        flex: '0 0 32px',
+        textAlign: 'right',
+        color: 'var(--dsw-alias-label-secondary)',
+        fontVariantNumeric: 'tabular-nums',
+      },
+    }
+
+    /** Lane colours are artwork, so literal values are allowed as fallbacks. */
+    const LANE_META = {
+      code: { color: 'var(--dsw-alias-state-success-primary, #2ea043)' },
+      frontier: { color: 'var(--dsw-alias-state-warning-primary, #d29922)' },
+      human: { color: 'var(--dsw-alias-state-error-primary, #f85149)' },
+    }
+
+    function LaneDot(props) {
+      const meta = LANE_META[props.lane] || LANE_META.code
+      return h('span', { style: { ...s.dot, background: meta.color } })
     }
 
     function PanelIcon(props) {
@@ -262,12 +384,133 @@ window.__ModuleLoader__.load({
       return h(Empty, { text: props.t('noLedger') })
     }
 
+    /**
+     * The decision panel: a projection of the host's append-only event log.
+     * It keeps no state beyond the last fetch, so a host restart shows fewer
+     * rows instead of a stale lie.
+     */
+    function DecisionsTab(props) {
+      const { t } = props
+      const [state, setState] = useState(null)
+      const [failed, setFailed] = useState(false)
+
+      useEffect(() => {
+        let live = true
+        let timer = null
+        const load = () => {
+          fetch(STATE_URL, { headers: { accept: 'application/json' }, credentials: 'same-origin' })
+            .then(response => {
+              if (!response.ok) throw new Error(`HTTP ${response.status}`)
+              return response.json()
+            })
+            .then(body => {
+              if (!live) return
+              setState(body)
+              setFailed(false)
+            })
+            .catch(() => {
+              if (live) setFailed(true)
+            })
+            .finally(() => {
+              if (live) timer = setTimeout(load, 3000)
+            })
+        }
+        load()
+        return () => {
+          live = false
+          if (timer !== null) clearTimeout(timer)
+        }
+      }, [])
+
+      if (!state) {
+        return h('div', { style: s.card }, h(Empty, { text: failed ? t('decisionsOffline') : t('loading') }))
+      }
+
+      const summary = state.summary || {}
+      const split = (summary.lanes && summary.lanes.split) || { code: 0, frontier: 0, human: 0 }
+      const counts = (summary.lanes && summary.lanes.counts) || { code: 0, frontier: 0, human: 0 }
+      const events = Array.isArray(state.events) ? state.events : []
+      const waiting = Array.isArray(summary.waiting) ? summary.waiting : []
+
+      const laneLabel = lane => t(lane === 'human' ? 'laneHuman' : lane === 'frontier' ? 'laneFrontier' : 'laneCode')
+      const laneHint = lane => t(lane === 'human' ? 'laneHintHuman' : lane === 'frontier' ? 'laneHintFrontier' : 'laneHintCode')
+      const laneColor = lane => (LANE_META[lane] || LANE_META.code).color
+
+      const stats = [
+        { key: 'forks', label: t('statForks'), value: String(summary.forks ?? 0) },
+        { key: 'decisions', label: t('statDecisions'), value: String(summary.decisions ?? 0) },
+        { key: 'held', label: t('statHeld'), value: String(summary.held ?? 0) },
+        { key: 'spent', label: t('statSpent'), value: `$${Number(summary.spentUsd ?? 0).toFixed(4)}` },
+      ]
+
+      const streamRow = event => {
+        // An approval reads as the task it is holding, not as "yes".
+        // Other human-lane rows ("which file", 0.40) still read as a value.
+        const asking = event.decision === 'ask_person' || event.irreversible === true
+        const detail = asking && event.task ? event.task : String(event.value ?? '—')
+        return h(
+          'div',
+          { key: event.id ?? event.seq ?? event.decision, style: s.streamRow },
+          h(LaneDot, { lane: event.lane }),
+          h('span', { style: s.streamName }, event.question || event.decision || '—'),
+          h('span', { style: s.streamValue }, detail),
+          h('span', { style: s.confBar },
+            h('span', {
+              style: {
+                ...s.confFill,
+                width: `${Math.round((Number(event.confidence) || 0) * 100)}%`,
+                background: laneColor(event.lane),
+              },
+            })),
+          h('span', { style: s.confText }, (Number(event.confidence) || 0).toFixed(2)),
+        )
+      }
+
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
+        h('div', { style: s.statRow }, stats.map(stat =>
+          h('div', { key: stat.key, style: s.stat },
+            h('span', { style: s.statValue }, stat.value),
+            h('span', { style: s.statLabel }, stat.label)))),
+
+        h('div', { style: s.card },
+          h('h2', { style: s.sectionTitle }, t('decisionsTitle')),
+          h('div', { style: s.bar }, ['code', 'frontier', 'human'].map(lane =>
+            h('span', {
+              key: lane,
+              style: { width: `${split[lane] || 0}%`, background: laneColor(lane) },
+            }))),
+          h('div', { style: s.legend }, ['code', 'frontier', 'human'].map(lane =>
+            h('span', { key: lane, style: s.legendItem },
+              h(LaneDot, { lane }),
+              h('span', null, `${laneLabel(lane)} ${split[lane] || 0}%`),
+              h('span', { style: s.streamValue }, `${counts[lane] || 0} · ${laneHint(lane)}`))))),
+
+        h('div', { style: s.card },
+          h('h2', { style: s.sectionTitle }, t('streamTitle')),
+          events.length === 0
+            ? h(Empty, { text: t('recentEmpty') })
+            : h('div', null, events.map(streamRow))),
+
+        h('div', { style: s.card },
+          h('h2', { style: s.sectionTitle }, t('waitingTitle')),
+          waiting.length === 0
+            ? h(Empty, { text: t('waitingEmpty') })
+            : h('ul', { style: s.list }, waiting.map(event =>
+                h('li', { key: event.id ?? event.seq ?? event.decision, style: s.row },
+                  h('span', null, String(event.task ?? event.value ?? event.decision ?? '—')),
+                  h('span', { style: s.muted }, event.question || ''))))),
+      )
+    }
+
     function Panel(props) {
       const ctx = props && props.ctx
       const t = useTranslate(ctx, DICT.zh)
-      const [tab, setTab] = useState('delivery')
+      const [tab, setTab] = useState('decisions')
 
       const tabs = [
+        { id: 'decisions', label: t('tabDecisions') },
         { id: 'delivery', label: t('tabDelivery') },
         { id: 'staff', label: t('tabStaff') },
         { id: 'ledger', label: t('tabFinance') },
@@ -292,7 +535,8 @@ window.__ModuleLoader__.load({
               onClick: () => setTab(item.id),
             }, item.label)),
           ),
-          tab === 'delivery' ? h(DeliveryTab, { t })
+          tab === 'decisions' ? h(DecisionsTab, { t })
+            : tab === 'delivery' ? h(DeliveryTab, { t })
             : tab === 'staff' ? h(StaffTab, { t })
             : h(LedgerTab, { t }),
         ),

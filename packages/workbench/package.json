@@ -10,8 +10,12 @@
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
-  "files": ["locale/*.json"],
+  "files": ["locale/*.json", "*.js", "preview"],
   "icon": "./icon.svg",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "preview": "node preview/seed.mjs"
+  },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

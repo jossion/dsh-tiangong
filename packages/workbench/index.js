@@ -5,6 +5,11 @@
  *  - operations: staff directory and finance ledger, persisted as local JSON
  *  - delivery:   requirement-driven software planning runs
  *
+ * Plus the decision log both of them write into: every judgement the delivery
+ * workflow makes becomes one line in `events.jsonl`, and the panel is a
+ * projection of that file. The panel reads it over one read-only host route,
+ * so the browser never keeps its own copy of the data.
+ *
  * Everything registered here is owned by this plugin's context, so unloading
  * the plugin removes it. Optional services are resolved lazily so the plugin
  * still activates in a profile that lacks them.
@@ -13,6 +18,7 @@ import { homedir } from 'node:os'
 import { join, isAbsolute } from 'node:path'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
+import { createEventLog } from './events.js'
 
 export const inject = ['llm', 'tools']
 
@@ -22,9 +28,22 @@ const DEFAULTS = {
   model: 'deepseek-chat',
 }
 
+/** The panel reads this. GET only: nothing reachable here starts work. */
+export const STATE_PATH = '/workbench/state'
+
 function resolveDataDir(configured) {
   if (configured) return configured
   return join(homedir(), '.dsh', 'workbench')
+}
+
+function sendJson(response, status, value) {
+  const body = JSON.stringify(value)
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': String(Buffer.byteLength(body)),
+  })
+  response.end(body)
 }
 
 export function apply(ctx, row) {
@@ -34,11 +53,68 @@ export function apply(ctx, row) {
   }
 
   const store = createStore(config.dataDir)
+  const events = createEventLog(join(config.dataDir, 'events.jsonl'))
 
-  const delivery = createDelivery({ ctx, config, store })
+  // A decision sink that never lets an audit failure abort a run: losing one
+  // log line is bad, losing the delivery is worse.
+  const recordDecision = event => events.append(event).catch(error => {
+    try {
+      ctx.logger?.warn?.('[workbench] could not record decision', error)
+    } catch {
+      /* logging is best-effort too */
+    }
+    return null
+  })
 
-  // Cordis contexts only expose declared keys, so the store and delivery
-  // runner stay module-local; the tool below is the plugin's public surface.
+  const delivery = createDelivery({ ctx, config, store, onDecision: recordDecision })
+
+  // Cordis contexts only expose declared keys, so the store, event log and
+  // delivery runner stay module-local; the tool and the route below are the
+  // plugin's public surface.
+
+  // Read-only state route for the panel. Registered as an effect so it is
+  // withdrawn with the plugin, and skipped when the profile has no web server
+  // (a headless run still writes events, it just cannot be watched live).
+  ctx.effect(() => {
+    let webServer
+    try {
+      webServer = ctx.get('webServer')
+    } catch {
+      return () => {}
+    }
+    if (!webServer || typeof webServer.register !== 'function') {
+      return () => {}
+    }
+
+    const dispose = webServer.register({
+      kind: 'exact',
+      path: STATE_PATH,
+      handler: async (request, response) => {
+        if (request.method !== 'GET' && request.method !== 'HEAD') {
+          sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+          return
+        }
+        try {
+          const summary = await events.summary()
+          const recent = await events.tail(30)
+          // Newest first is what the stream renders; the file stays oldest-first.
+          sendJson(response, 200, { summary, events: recent.reverse() })
+        } catch (error) {
+          sendJson(response, 500, {
+            error: { code: 'state-unavailable', message: String(error?.message ?? error) },
+          })
+        }
+      },
+    })
+
+    return () => {
+      try {
+        dispose?.()
+      } catch {
+        /* already withdrawn */
+      }
+    }
+  })
 
   // One tool so the agent can drive delivery from an ordinary conversation,
   // which is how a non-technical owner will actually reach it.
