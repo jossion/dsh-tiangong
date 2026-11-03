@@ -191,7 +191,32 @@ findskill { query, taskId? }
 4. **上传**：`fileUploads` 是 agent-scoped Remote；工作台要落项目目录，可能自建上传路由。
 5. **成本**：`tokenMeter`/`assistant/message.usage` 汇总到 job，作为预算熔断依据（H 阶段）。
 
-## 13. 命名
+## 13. 真机跑通记录（2026-11-03，已验证）
+
+第一个完整闭环在桌面版真实宿主上跑通（不是单测）：
+
+| 时间 | 事件 | 证据 |
+|---|---|---|
+| 03:37:03 | 需求提交 | `requirement submitted` + `requirements/<jobId>.md` 落盘 |
+| 03:37:03 | 绑定会话 | `project config` / `job config` 带 `sessionId` + `workspaceId` |
+| 03:37:11 | 主 agent 规划 | `dispatch plan ok:true`，规划指令进入交付会话 |
+| 03:39 | 计划提交 | `plan submitted` + 3 张工作项卡（`hello-txt` / `smoke-test` / `verify-smoke`） |
+| 03:39–03:41 | 自动派发 | 主 agent 取卡 → 派子 agent → 子 agent 改工作区、跑测试 → `workbench_report_work` 记 done（真实测试计数） |
+| 03:41 | 完成判定 | 3/3 叶子卡 done → `delivery` 事件，project/job 状态 `done` |
+
+产物：`~/.dsh/workbench/apps/prj_mw04zijn_s5ds36/hello.txt`（内容「天工闭环验证」）
+与 `tests/smoke.test.mjs`，测试由子 agent 真实执行。
+
+真机暴露并修复的三个宿主 seam（代码里都有注释，避免回归）：
+
+1. `session.create` 只接受 `workspaceId` 或 `cwd` 之一；
+2. 新建会话必须显式选择模型（否则 prompt 变量 `{{model}}` 为空）；
+3. 部署 agent preset 必须在首个 turn 前挂载（`agentPresets.resolve/select`）。
+
+排查工具：`workbench_delivery_diagnostics`（只读）返回服务挂载、解析到的预设、选中的模型与每步错误；
+每次 `dispatch` 事件也会带 `preparation` 报告，卡住时先看账本再看它。
+
+## 14. 命名
 
 展示名：**天工（Tiangong）**，标语「天工 · 需求成物」。
 包名暂留 `@jos/workbench`（避免重装 profile），只改 locale `meta.title` 与面板文案。
