@@ -203,3 +203,26 @@ test('the wake text names the job and the reporting contract', () => {
   assert.match(text, /workbench_report_work/)
   assert.match(text, /test evidence/i)
 })
+
+test('a failed bind keeps the workspace so the retry does not register it twice', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    const sessions = fakeSessions({
+      ensure: () => ({ ok: false, error: 'session create failed: boom', workspace: '/tmp/ws', workspaceId: 'ws_1' }),
+    })
+    const dispatcher = createDispatcher({ ctx: silentCtx, config: { ...config, dataDir: dir }, events: log, sessions, now: () => 1_000_000 })
+    await dispatcher.tick()
+
+    const all = await createEventLog(join(dir, 'events.jsonl')).all()
+    const projectConfig = all.find(line => line.kind === 'project' && line.event === 'config')
+    assert.equal(projectConfig.workspace, '/tmp/ws')
+    assert.equal(projectConfig.workspaceId, 'ws_1')
+    assert.equal(projectConfig.sessionId, undefined, 'a failed bind must not claim a session')
+    assert.ok(all.some(line => line.decision === 'ask_person'))
+
+    // The next tick asks the bridge again; the bridge can now reuse ws_1.
+    await dispatcher.tick()
+    assert.equal(sessions.calls.ensure.length, 2)
+  })
+})

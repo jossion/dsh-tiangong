@@ -60,7 +60,16 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
           const created = await registry.create(path, project?.title ?? project?.id)
           workspaceId = created?.id ?? null
         } catch {
-          workspaceId = null
+          // A previous attempt may already have registered this path (the
+          // session creation failed afterwards); reuse it instead of failing.
+          if (typeof registry.resolveByPath === 'function') {
+            try {
+              const existing = await registry.resolveByPath(path)
+              workspaceId = existing?.id ?? null
+            } catch {
+              workspaceId = null
+            }
+          }
         }
       }
     }
@@ -164,8 +173,10 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       : 'standard'
     const controller = optional('sessionController')
     if (controller !== null && controller !== undefined && typeof controller.create === 'function') {
-      const request = { cwd: path, agentPreset: preset }
+      // session.create accepts workspaceId OR cwd, never both.
+      const request = { agentPreset: preset }
       if (typeof workspaceId === 'string' && workspaceId !== '') request.workspaceId = workspaceId
+      else request.cwd = path
       try {
         const created = await controller.create(request)
         if (typeof created?.sessionId === 'string' && created.sessionId !== '') {

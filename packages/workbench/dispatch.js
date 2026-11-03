@@ -161,6 +161,17 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
       case 'bind-session': {
         const bound = await sessions.ensureProjectSession(project)
         if (!bound.ok) {
+          // Keep the workspace (and its DSH id) so the next attempt reuses it
+          // instead of registering the same directory twice.
+          if (bound.workspace !== undefined && bound.workspace !== null) {
+            const ts = nowIso(now)
+            await events.append({
+              kind: 'project', projectId: project.id, event: 'config',
+              workspace: bound.workspace, workspaceId: bound.workspaceId ?? null, ts,
+            })
+            project.workspace = bound.workspace
+            project.workspaceId = bound.workspaceId ?? project.workspaceId
+          }
           await gate(project, job, 'session-unavailable', bound.error)
           return
         }

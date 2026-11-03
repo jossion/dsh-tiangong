@@ -154,8 +154,8 @@ test('the session controller creates the delivery session with a mounted preset'
     assert.equal(result.sessionId, 'session-abc')
     assert.equal(result.agentPreset, 'standard', 'the deployment preset is explicit')
     assert.equal(captured.length, 1)
-    assert.equal(captured[0].workspaceId, 'ws_1')
-    assert.equal(captured[0].cwd, join(dir, 'apps', 'p1'))
+    assert.equal(captured[0].workspaceId, 'ws_1', 'a registered workspace is addressed by id')
+    assert.equal(captured[0].cwd, undefined, 'workspaceId and cwd are mutually exclusive')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
@@ -186,6 +186,59 @@ test('waking prefers the session controller, which mounts the deployment', async
     assert.equal(prompted[0].mode, 'queue')
     assert.equal(prompted[0].content[0].text, 'do the work')
     assert.equal(typeof prompted[0].requestId, 'string')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a workspace registered by a failed attempt is reused on the next try', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const captured = []
+    let creates = 0
+    const ctx = fakeCtx({
+      workspaceRegistry: {
+        async create() {
+          creates += 1
+          throw new Error('already exists')
+        },
+        async resolveByPath() {
+          return { id: 'ws_existing' }
+        },
+      },
+      sessionController: {
+        async create(request) {
+          captured.push(request)
+          return { sessionId: 'session-abc' }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    const result = await bridge.ensureProjectSession({ id: 'p1' })
+    assert.equal(result.ok, true)
+    assert.equal(creates, 1)
+    assert.equal(captured[0].workspaceId, 'ws_existing')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('without a workspace id the session is created by cwd', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const captured = []
+    const ctx = fakeCtx({
+      sessionController: {
+        async create(request) {
+          captured.push(request)
+          return { sessionId: 'session-abc' }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    await bridge.ensureProjectSession({ id: 'p1' })
+    assert.equal(captured[0].cwd, join(dir, 'apps', 'p1'))
+    assert.equal(captured[0].workspaceId, undefined)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
