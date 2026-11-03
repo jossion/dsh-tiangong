@@ -334,3 +334,20 @@ test('a deleted project card disappears from the board but keeps its history', (
   assert.ok(folded.deletedProjects.has('p1'), 'the deletion is part of the folded history')
   assert.ok(folded.projects.has('p1') === false, 'but the project meta is not resurrected')
 })
+
+test('a created line after a delete restores the card and its history', () => {
+  const events = [
+    projectEvent({ projectId: 'p2', title: '公司管理', ts: ts(0) }),
+    jobEvent({ projectId: 'p2', jobId: 'p2', title: '公司管理', ts: ts(1) }),
+    taskEvent({ event: 'created', taskId: 'p2:wi:a', projectId: 'p2', jobId: 'p2', stage: 'build', title: 'A', ts: ts(2) }),
+    projectEvent({ projectId: 'p2', event: 'deleted', ts: ts(3) }),
+    projectEvent({ projectId: 'p2', title: '公司管理', event: 'created', ts: ts(4) }),
+    projectEvent({ projectId: 'p2', workspace: '/tmp/company', event: 'config', ts: ts(5) }),
+  ]
+  const board = buildBoard(events)
+  assert.equal(board.projects.length, 1, 'the card is back on the board')
+  assert.equal(board.projects[0].title, '公司管理')
+  assert.equal(board.projects[0].workspace, '/tmp/company')
+  assert.equal(board.projects[0].jobs.length, 1, 'its earlier job history is visible again')
+  assert.equal(board.projects[0].totals.tasks, 1)
+})

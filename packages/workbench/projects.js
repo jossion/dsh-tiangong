@@ -360,6 +360,9 @@ export function foldTasks(events) {
         projects.delete(event.projectId)
         continue
       }
+      // A later `created` line restores a card a person deleted earlier: the
+      // ledger keeps the history, so the card comes back with it.
+      if (event.event === 'created') deletedProjects.delete(event.projectId)
       let project = projects.get(event.projectId)
       if (project === undefined) {
         project = {
