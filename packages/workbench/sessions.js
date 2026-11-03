@@ -107,6 +107,23 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     if (typeof sessionId !== 'string' || sessionId === '') {
       return { ok: false, error: 'no session bound' }
     }
+    // The sanctioned path: the session controller resumes the Agent for us and
+    // admits the prompt through the same door the panel uses. It also mounts
+    // the deployment preset, which a raw followup on a hand-built agent lacks.
+    const controller = optional('sessionController')
+    if (controller !== null && controller !== undefined && typeof controller.prompt === 'function') {
+      try {
+        const receipt = await controller.prompt({
+          requestId: randomUUID(),
+          sessionId,
+          mode: 'queue',
+          content: [{ type: 'text', text: String(text) }],
+        })
+        if (receipt?.accepted === true) return { ok: true, via: 'session-controller' }
+      } catch {
+        /* fall through to the followup path */
+      }
+    }
     const agent = await resolveAgent(sessionId)
     if (agent === null) return { ok: false, error: 'no live agent for this session' }
     if (typeof agent.followup !== 'function') return { ok: false, error: 'agent does not accept followup' }
@@ -142,22 +159,39 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: true, sessionId: project.sessionId, workspace: project.workspace ?? null, created: false }
     }
     const { path, workspaceId } = await ensureWorkspace(project)
+    const preset = typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
+      ? config.agentPreset.trim()
+      : 'standard'
+    const controller = optional('sessionController')
+    if (controller !== null && controller !== undefined && typeof controller.create === 'function') {
+      const request = { cwd: path, agentPreset: preset }
+      if (typeof workspaceId === 'string' && workspaceId !== '') request.workspaceId = workspaceId
+      try {
+        const created = await controller.create(request)
+        if (typeof created?.sessionId === 'string' && created.sessionId !== '') {
+          return { ok: true, sessionId: created.sessionId, workspace: path, workspaceId, created: true, agentPreset: created.agentPreset ?? preset }
+        }
+        throw new Error('session create returned no id')
+      } catch (error) {
+        return { ok: false, error: `session create failed: ${String(error?.message ?? error)}`, workspace: path, workspaceId }
+      }
+    }
+
+    // Fallback for a host without the session controller: the agent factory
+    // creates the agent and its session, but the preset has to be mounted by us
+    // or the prompt assembly has no deployment variables (observed as
+    // "prompt variable {{model}} has no value").
     const agents = optional('agents')
     if (agents === undefined || agents === null || typeof agents.create !== 'function') {
-      return { ok: false, error: 'agents service unavailable', workspace: path, workspaceId }
+      return { ok: false, error: 'session controller and agents service unavailable', workspace: path, workspaceId }
     }
-    // `agents.create` constructs the agent AND its session; pre-creating the
-    // session makes the factory reject with "session already exists".
     const sessionId = `session-${randomUUID()}`
-    const options = { sessionId, meta: { cwd: path } }
-    if (typeof config.agentPreset === 'string' && config.agentPreset.trim() !== '') {
-      options.meta.agentPreset = config.agentPreset.trim()
-    }
-    if (typeof config.provider === 'string' && config.provider !== ''
-      || typeof config.model === 'string' && config.model !== '') {
-      options.agentOptions = {
-        ...(typeof config.provider === 'string' && config.provider !== '' ? { provider: config.provider } : {}),
-        ...(typeof config.model === 'string' && config.model !== '' ? { model: config.model } : {}),
+    const options = { sessionId, meta: { cwd: path, agentPreset: preset } }
+    const presets = optional('agentPresets')
+    if (presets !== null && presets !== undefined && typeof presets.mount === 'function') {
+      options.setup = async agentCtx => {
+        const resolved = typeof presets.resolve === 'function' ? await presets.resolve(preset) : { id: preset }
+        await presets.mount(agentCtx, resolved?.id ?? preset)
       }
     }
     try {
@@ -166,7 +200,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     } catch (error) {
       return { ok: false, error: `agent create failed: ${String(error?.message ?? error)}`, sessionId, workspace: path, workspaceId }
     }
-    return { ok: true, sessionId, workspace: path, workspaceId, created: true }
+    return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset }
   }
 
   return { ensureProjectSession, ensureWorkspace, wake, resolveAgent, appRootFor }

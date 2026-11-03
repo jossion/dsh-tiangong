@@ -59,7 +59,6 @@ test('the first requirement creates one session, one agent and a workspace', asy
     assert.equal(options.sessionId, result.sessionId, 'the factory creates the session it is given')
     assert.equal(options.meta.cwd, join(dir, 'apps', 'p1'))
     assert.equal(options.meta.agentPreset, 'agent-team')
-    assert.deepEqual(options.agentOptions, { provider: 'deepseek', model: 'flash' })
 
     // A project that already has a session reuses it: no second agent.
     const again = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理', sessionId: result.sessionId })
@@ -82,7 +81,7 @@ test('a project session degrades to a reported error without host services', asy
     })
     const result = await bridge.ensureProjectSession({ id: 'p1' })
     assert.equal(result.ok, false)
-    assert.match(result.error, /agents service unavailable/)
+    assert.match(result.error, /session controller and agents service unavailable/)
     // The workspace path is still prepared so a later restart needs no migration.
     assert.equal(result.workspace, join(dir, 'apps', 'p1'))
     await stat(join(dir, 'apps', 'p1'))
@@ -126,6 +125,67 @@ test('wake failures are returned, never thrown into the loop', async () => {
     assert.equal((await bridge.wake('sess-1', 'x')).ok, false)
     assert.equal((await bridge.wake('', 'x')).ok, false)
     assert.match((await bridge.wake('sess-1', 'x')).error, /no live agent/)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the session controller creates the delivery session with a mounted preset', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const captured = []
+    const ctx = fakeCtx({
+      sessionController: {
+        async create(request) {
+          captured.push(request)
+          return { sessionId: 'session-abc', agentPreset: request.agentPreset }
+        },
+      },
+      workspaceRegistry: {
+        async create() {
+          return { id: 'ws_1' }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+
+    const result = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理' })
+    assert.equal(result.ok, true)
+    assert.equal(result.sessionId, 'session-abc')
+    assert.equal(result.agentPreset, 'standard', 'the deployment preset is explicit')
+    assert.equal(captured.length, 1)
+    assert.equal(captured[0].workspaceId, 'ws_1')
+    assert.equal(captured[0].cwd, join(dir, 'apps', 'p1'))
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('waking prefers the session controller, which mounts the deployment', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const prompted = []
+    const ctx = fakeCtx({
+      sessionController: {
+        async prompt(request) {
+          prompted.push(request)
+          return { accepted: true }
+        },
+        async create() {
+          return { sessionId: 'session-abc' }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+
+    const result = await bridge.wake('session-abc', 'do the work')
+    assert.equal(result.ok, true)
+    assert.equal(result.via, 'session-controller')
+    assert.equal(prompted.length, 1)
+    assert.equal(prompted[0].sessionId, 'session-abc')
+    assert.equal(prompted[0].mode, 'queue')
+    assert.equal(prompted[0].content[0].text, 'do the work')
+    assert.equal(typeof prompted[0].requestId, 'string')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

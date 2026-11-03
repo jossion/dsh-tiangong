@@ -177,6 +177,12 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
           sessionId: bound.sessionId, workspace: bound.workspace ?? null,
           workspaceId: bound.workspaceId ?? null, ts,
         })
+        // Later jobs in this same tick read the board snapshot taken before the
+        // bind; without this the project would grow one session per job.
+        project.sessionId = bound.sessionId
+        project.workspace = bound.workspace ?? project.workspace
+        project.workspaceId = bound.workspaceId ?? project.workspaceId
+        job.sessionId = bound.sessionId
         return
       }
       case 'start-planning': {
