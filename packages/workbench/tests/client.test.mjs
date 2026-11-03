@@ -475,7 +475,7 @@ test('the panel itself renders with its title and no data', () => {
     else walkTypes(props.children)
   }
   walkTypes(tree)
-  assert.ok(strings.includes('工作台'), 'the panel paints its heading before any fetch')
+  assert.ok(strings.includes('天工'), 'the panel paints its heading before any fetch')
 })
 
 test('edges always drift, but a running edge moves faster', () => {
@@ -1057,7 +1057,7 @@ test('the panel is the projects board, not a tab bar with finance on it', () => 
   walk(tree, node => {
     if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
   })
-  assert.ok(strings.includes('工作台'), 'the panel heading is still there')
+  assert.ok(strings.includes('天工'), 'the panel heading is still there')
   assert.ok(!strings.includes('财务管理'), 'finance is not a sibling tab of the projects board')
   assert.ok(!strings.includes('financeTab'), 'no placeholder for a removed tab')
 })
@@ -1301,4 +1301,90 @@ test('the employee form links a company and shows only that company departments'
   assert.ok(code.includes("loadOrg(next)"), 'changing company reloads its departments')
   assert.ok(code.includes("setValue('departmentId', '')"), 'changing company clears the stale department')
   assert.ok(!/key: 'department'/.test(code), 'no second, free-text department field')
+})
+
+test('the task dialog can attach a requirement document, and only offers it when supported', () => {
+  const api = factory(name => {
+    if (name !== 'react') throw new Error(`unexpected require: ${name}`)
+    return stubReact()
+  })
+  const t = key => key
+  const withUpload = api.__components.TaskDialog({
+    t,
+    brief: '',
+    error: null,
+    busy: false,
+    file: null,
+    fileError: null,
+    onPickFile: () => {},
+    onClearFile: () => {},
+    onChange: () => {},
+    onCancel: () => {},
+    onConfirm: () => {},
+  })
+  const inputs = []
+  walk(withUpload, node => {
+    if (node.props && node.props.type === 'file') inputs.push(node.props)
+  })
+  assert.equal(inputs.length, 1, 'a document input is offered')
+  assert.equal(inputs[0].accept, '.md,.markdown,.txt')
+  assert.equal(inputs[0].disabled, false)
+
+  const withoutUpload = api.__components.TaskDialog({
+    t,
+    brief: '',
+    error: null,
+    busy: false,
+    onChange: () => {},
+    onCancel: () => {},
+    onConfirm: () => {},
+  })
+  const none = []
+  walk(withoutUpload, node => {
+    if (node.props && node.props.type === 'file') none.push(node.props)
+  })
+  assert.equal(none.length, 0, 'the follow-up dialog stays text-only')
+})
+
+test('a job created by the requirement intake shows its automatic state', () => {
+  const api = factory(name => {
+    if (name !== 'react') throw new Error(`unexpected require: ${name}`)
+    return stubReact()
+  })
+  const t = key => key
+  const job = jobOf('j1', '员工管理', false, 0, {
+    requirement: { text: '给公司管理加员工管理页', source: 'text' },
+    planBy: null,
+  })
+  const project = { id: 'prj_1', title: '公司管理', jobs: [job], progress: { done: 0, total: 1 } }
+  const tree = api.__components.TaskList({
+    t,
+    project,
+    onBack: () => {},
+    onOpenJob: () => {},
+    onNewTask: () => {},
+  })
+  const strings = []
+  walk(tree, node => {
+    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
+  })
+  assert.ok(strings.includes('autoPlanning'), 'before a plan it reads as planning')
+
+  const planned = jobOf('j1', '员工管理', false, 0, {
+    requirement: { text: 'x', source: 'text' },
+    planBy: 'agent',
+  })
+  const tree2 = api.__components.TaskList({
+    t,
+    project: { ...project, jobs: [planned] },
+    onBack: () => {},
+    onOpenJob: () => {},
+    onNewTask: () => {},
+  })
+  const strings2 = []
+  walk(tree2, node => {
+    if (typeof (node.props || {}).children === 'string') strings2.push(node.props.children)
+  })
+  assert.ok(strings2.includes('autoRunning'), 'after a plan it reads as dispatching')
+  assert.ok(strings2.includes('autoWaiting'), 'a gate on the job asks for a person')
 })

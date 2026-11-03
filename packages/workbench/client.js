@@ -22,8 +22,8 @@ window.__ModuleLoader__.load({
      */
     const DICT = {
       en: {
-        panelLabel: 'Workbench',
-        title: 'Workbench',
+        panelLabel: 'Tiangong',
+        title: 'Tiangong',
         tabDelivery: 'Delivery',
         tabStaff: 'Staff',
         tabFinance: 'Finance',
@@ -170,7 +170,7 @@ window.__ModuleLoader__.load({
         boardFit: 'Fit',
         boardExpand: 'expand',
         taskEntryTitle: 'New task',
-        taskEntryHint: 'Describe what should be built. Planning turns it into a project with a task tree.',
+        taskEntryHint: 'Describe what should be built, or attach a requirement document. The app plans, dispatches and verifies it automatically.',
         taskEntryPlaceholder: 'A quotation system for our company. Four kinds of people use it: ...',
         taskSubmit: 'Start',
         taskPlanSubmit: 'Generate plan',
@@ -223,10 +223,20 @@ window.__ModuleLoader__.load({
         overviewDone: 'Every task is done. Open development only if you want to change something.',
         backToOverview: '← Overview',
         createCard: 'Create',
-        createDialogTitle: 'New project card',
+        createDialogTitle: 'Create an app',
         createNamePlaceholder: 'e.g. Company operations',
+        createHint: 'The app gets its own workspace and a dedicated delivery session. Submit a requirement and the automatic loop takes over.',
         createCancel: 'Cancel',
-        createConfirm: 'Create',
+        createConfirm: 'Create app',
+        uploadChoose: 'Attach requirement doc',
+        uploadRemove: 'Remove',
+        uploadHint: 'Accept .md / .markdown / .txt up to 512 KiB. You can also paste the requirement.',
+        uploadTooBig: 'The document is larger than 512 KiB. Split it or paste the requirement.',
+        uploadUnsupported: 'Only .md / .markdown / .txt documents are supported for now.',
+        uploadReadFailed: 'Could not read the document.',
+        autoPlanning: 'auto · planning',
+        autoRunning: 'auto · dispatching',
+        autoWaiting: 'needs you',
         cardEmpty: 'No cards yet. Create the first one.',
         cardSubtitle: 'click to open',
         laneBusy: 'working',
@@ -382,8 +392,8 @@ window.__ModuleLoader__.load({
         colHiredAt: 'Hired',
       },
       zh: {
-        panelLabel: '工作台',
-        title: '工作台',
+        panelLabel: '天工',
+        title: '天工',
         tabDelivery: '软件开发',
         tabStaff: '人员管理',
         tabFinance: '财务管理',
@@ -528,7 +538,7 @@ window.__ModuleLoader__.load({
         boardFit: '复位',
         boardExpand: '展开剩余',
         taskEntryTitle: '新建任务',
-        taskEntryHint: '写一句需求，规划会把它变成一个有任务树的项目。',
+        taskEntryHint: '写一句需求，或附一份需求文档。应用会自动规划、派发并验证。',
         taskEntryPlaceholder: '一个公司内部的报价单系统。四类人使用：销售、销售主管、财务、管理员……',
         taskSubmit: '开工',
         taskPlanSubmit: '生成计划',
@@ -581,10 +591,20 @@ window.__ModuleLoader__.load({
         overviewDone: '所有任务都完成了。要改动时再进开发。',
         backToOverview: '← 概览',
         createCard: '创建',
-        createDialogTitle: '创建新项目卡片',
+        createDialogTitle: '创建应用',
         createNamePlaceholder: '例如：公司管理',
+        createHint: '创建后自动分配工作区和专属交付会话；提交需求就进入自动闭环。',
         createCancel: '取消',
-        createConfirm: '创建',
+        createConfirm: '创建应用',
+        uploadChoose: '选择需求文档',
+        uploadRemove: '移除',
+        uploadHint: '支持 .md / .markdown / .txt，≤512 KiB；也可以直接粘贴需求。',
+        uploadTooBig: '文档超过 512 KiB，请拆分或改贴文本。',
+        uploadUnsupported: '暂时只支持 .md / .markdown / .txt 文档。',
+        uploadReadFailed: '文档读取失败。',
+        autoPlanning: '自动·规划中',
+        autoRunning: '自动·执行中',
+        autoWaiting: '等你决定',
         cardEmpty: '还没有卡片，先创建一张。',
         cardSubtitle: '点击进入',
         laneBusy: '工作中',
@@ -2723,13 +2743,27 @@ window.__ModuleLoader__.load({
                         border: `1px solid ${accent}`,
                       },
                     }, done ? '✓' : cancelled ? '✕' : paused ? '❚❚' : '●'),
-                    h('span', { style: { ...s.stageName, fontSize: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, job.title || job.id),
+                    h('span', {
+                      style: {
+                        ...s.stageName, fontSize: '14px', overflow: 'hidden', whiteSpace: 'normal',
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      },
+                    }, job.title || job.id),
                     h('span', {
                       style: {
                         marginLeft: 'auto', flex: '0 0 auto', fontSize: '10px', letterSpacing: '.6px',
                         color: accent, textTransform: 'uppercase',
                       },
                     }, statusOf(job))),
+                  job.requirement && !done
+                    ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                        h('span', {
+                          style: { ...s.badge, color: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)', borderColor: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)' },
+                        }, job.planBy ? t('autoRunning') : t('autoPlanning')),
+                        (job.gates || []).length
+                          ? h('span', { style: { ...s.badge, color: STATUS_COLOR.waiting, borderColor: STATUS_COLOR.waiting } }, t('autoWaiting'))
+                          : null)
+                    : null,
                   (job.parentJobId || childCount(job.id) > 0)
                     ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
                         job.parentJobId ? h('span', { style: s.badge }, `${t('taskFrom')} ${titleOf(job.parentJobId)}`) : null,
@@ -3665,7 +3699,8 @@ window.__ModuleLoader__.load({
           onChange: event => props.onChange(event.target.value),
           onKeyDown: event => { if (event.key === 'Enter') props.onConfirm() },
           autoFocus: true,
-        }))
+        }),
+        h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('createHint')))
     }
 
     /** The task entry, as a dialog instead of a permanently open textarea. */
@@ -3706,7 +3741,39 @@ window.__ModuleLoader__.load({
           onChange: event => props.onChange(event.target.value),
           disabled: props.busy,
           autoFocus: true,
-        }))
+        }),
+        typeof props.onPickFile === 'function'
+          ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+              h('label', {
+                className: 'wb-btn',
+                style: { ...s.badge, cursor: props.busy ? 'default' : 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+              },
+                t('uploadChoose'),
+                h('input', {
+                  type: 'file',
+                  accept: '.md,.markdown,.txt',
+                  disabled: props.busy,
+                  style: { display: 'none' },
+                  onChange: event => {
+                    props.onPickFile(event.target.files?.[0] ?? null)
+                    event.target.value = ''
+                  },
+                })),
+              props.file
+                ? h('span', { style: s.stageMeta }, `${props.file.name} · ${Math.max(1, Math.round(props.file.size / 1024))} KiB`)
+                : null,
+              props.file
+                ? h('button', {
+                    type: 'button',
+                    className: 'wb-btn',
+                    style: { ...s.badge, cursor: 'pointer', padding: '4px 10px' },
+                    onClick: () => props.onClearFile?.(),
+                  }, t('uploadRemove'))
+                : null)
+          : null,
+        typeof props.onPickFile === 'function'
+          ? h('p', { style: { ...s.muted, margin: 0, fontSize: '11px' } }, props.fileError || t('uploadHint'))
+          : null)
     }
 
     /**
@@ -3732,6 +3799,10 @@ window.__ModuleLoader__.load({
       const [jobBrief, setJobBrief] = useState('')
       const [jobBusy, setJobBusy] = useState(false)
       const [jobError, setJobError] = useState(null)
+      // A requirement document is read in the browser and sent as base64; the
+      // host decodes and stores it with the requirement.
+      const [jobFile, setJobFile] = useState(null)
+      const [jobFileError, setJobFileError] = useState(null)
 
       const bridge = useMemo(() => createSessionBridge(() => serviceCtx || hostCtx), [])
       const projects = payload && payload.board && Array.isArray(payload.board.projects)
@@ -3816,24 +3887,64 @@ window.__ModuleLoader__.load({
         }
       }, [cardName, reload, t])
 
+      const pickJobFile = useCallback(file => {
+        setJobError(null)
+        setJobFileError(null)
+        if (!file) return
+        const name = String(file.name || 'requirement')
+        const extension = (name.split('.').pop() || '').toLowerCase()
+        if (!['md', 'markdown', 'txt'].includes(extension)) {
+          setJobFileError(t('uploadUnsupported'))
+          return
+        }
+        if (file.size > 512 * 1024) {
+          setJobFileError(t('uploadTooBig'))
+          return
+        }
+        if (typeof FileReader !== 'function') {
+          setJobFileError(t('uploadReadFailed'))
+          return
+        }
+        const reader = new FileReader()
+        reader.onerror = () => setJobFileError(t('uploadReadFailed'))
+        reader.onload = () => {
+          const result = String(reader.result || '')
+          const comma = result.indexOf(',')
+          const base64 = comma >= 0 ? result.slice(comma + 1) : result
+          setJobFile({ name, size: file.size, base64 })
+        }
+        reader.readAsDataURL(file)
+      }, [t])
+
       const createJob = useCallback(async () => {
         setJobError(null)
-        if (!jobBrief.trim()) {
+        const text = jobBrief.trim()
+        if (text === '' && jobFile === null) {
           setJobError(t('emptyBrief'))
           return
         }
-        setJobBusy(true)
+        const file = jobFile
+        if (file !== null) setJobBusy(true)
+        else setJobBusy(true)
         try {
-          const response = await fetch('/workbench/start', {
+          // New requirements go through the closed-loop intake: the host opens
+          // a job, binds a delivery session and wakes the planning agent.
+          const response = await fetch('/workbench/requirements', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ requirement: jobBrief.trim(), projectId: project.id }),
+            body: JSON.stringify({
+              projectId: project.id,
+              ...(text === '' ? {} : { text }),
+              ...(file === null ? {} : { file: { name: file.name, base64: file.base64 } }),
+            }),
           })
           const body = await response.json().catch(() => null)
           if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
           setJobDialogOpen(false)
           setJobBrief('')
+          setJobFile(null)
+          setJobFileError(null)
           setTasksOpen(true)
           reload()
         } catch (error) {
@@ -3841,19 +3952,28 @@ window.__ModuleLoader__.load({
         } finally {
           setJobBusy(false)
         }
-      }, [jobBrief, project, reload, t])
+      }, [jobBrief, jobFile, project, reload, t])
 
       if (payload === null) {
         return h('div', { style: s.card }, h(Empty, { text: failed ? t('decisionsOffline') : t('loading') }))
       }
 
-      const openJobDialog = () => { setJobError(null); setJobDialogOpen(true) }
+      const openJobDialog = () => {
+        setJobError(null)
+        setJobFile(null)
+        setJobFileError(null)
+        setJobDialogOpen(true)
+      }
       const dialog = jobDialogOpen
         ? h(TaskDialog, {
             t,
             brief: jobBrief,
             error: jobError,
             busy: jobBusy,
+            file: jobFile,
+            fileError: jobFileError,
+            onPickFile: pickJobFile,
+            onClearFile: () => { setJobFile(null); setJobFileError(null) },
             onChange: value => setJobBrief(value),
             onCancel: () => setJobDialogOpen(false),
             onConfirm: createJob,

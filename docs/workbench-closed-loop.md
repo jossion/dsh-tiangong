@@ -175,7 +175,7 @@ findskill { query, taskId? }
 | **F** ✅ | `skillfind.js` + `workbench_find_skill`（会话目录 + 插件市场 + 审计行） | 无宿主服务时干净降级；命中带理由 |
 | **D** ✅ | `sessions.js`：项目专属会话 + 工作区、agent 创建/恢复、`followup` 唤醒、消息形状对齐宿主的 `user/message` | 无宿主服务时干净降级并落 human 卡点 |
 | **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
-| G | 面板：创建应用、需求上传、自动运行状态、卡点 | 截图复验（先过 UI 技能） |
+| **G** ✅ | 面板：创建应用文案、需求文档上传、任务卡自动状态、显示名天工 | headless Chromium 截图复验（面板/任务/对话框/附件） |
 | H | 审计遗留 P1：connection fence / 路径沙箱 / store 损坏保护 | 测试 + 手工验证 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）

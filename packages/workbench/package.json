@@ -1,27 +1,35 @@
 {
   "name": "@jos/workbench",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Workbench: company operations management and requirement-driven software delivery workflows.",
+  "description": "Tiangong: a requirement-driven autonomous delivery workbench for DSH.",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
-  "files": ["locale/*.json", "*.js", "preview"],
+  "files": [
+    "locale/*.json",
+    "*.js",
+    "icon.svg"
+  ],
   "icon": "./icon.svg",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "preview": "node preview/seed.mjs"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
-      "inject": ["@deepseek-ai/dsh-client-ui-conversation"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
     }
   }
 }

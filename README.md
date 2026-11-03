@@ -2,7 +2,8 @@
 
 公司运营管理 + 需求驱动的软件交付工作流。DSH bundle（host 插件 + web 客户端面板）。
 
-当前有一个可用面板：**@jos/workbench**，侧栏「工作台」入口 → 主面板。
+当前有一个可用面板：**@jos/workbench**（展示名「天工 / Tiangong」），侧栏「天工」入口 → 主面板。
+需求提交后自动闭环：规划 → 派发子 agent → 测试证据判定 → 交付。
 
 ## 目录
 
@@ -24,7 +25,7 @@ packages/workbench/          @jos/workbench 插件本体
 ├── sessions.js              交付会话：建工作区/会话/agent、followup 唤醒
 ├── dispatch.js              调度循环：事件驱动 tick、冷却、预算、交付去重
 ├── store.js                 本地 JSON 持久化（staff / ledger / deliveries）
-├── tests/                   node --test，231 个用例
+├── tests/                   node --test，248 个用例
 ├── preview/                 静态面板预览 + seed 脚本
 └── locale/                  插件卡片显示文案
 docs/
@@ -36,21 +37,21 @@ _dsh_ref/                    插件开发参考（host-plugin / ui-plugin / prac
 
 ```bash
 cd packages/workbench
-npm test              # 231 个测试
+npm test              # 248 个测试
 npm run preview       # 生成 preview/out/data.js，然后打开 preview/dashboard.html
 node --check client.js
 ```
 
 ## 装进 DSH
 
-profile 里以 symlink 方式挂载：
+官方路径是 `plugin_manager` 的 `install_bundle`（它会同时写入依赖、lock 与 bundle 列表）：
 
-```bash
-ln -sfn "$PWD/packages/workbench" ~/.dsh/profiles/desktop/node_modules/@jos/workbench
+```
+plugin_manager action=install_bundle target=/Users/jossion/codes/dsh-workflow-jos/packages/workbench
 ```
 
-`package.json` 的 `dsh.bundle.patch` 会把插件插进 profile，不需要手改 `cordis.patch.yml`。
-客户端改动需要重新加载 web 产物（重启 DSH，或 `pnpm run dev:web` 开着才有热更新）。
+开发期 profile 用 `"@jos/workbench": "link:…/packages/workbench"` 挂载（`dsh.bundle.patch` 会把插件插进 profile），
+不要手改 profile 的 `package.json` / `cordis.patch.yml`。host 改动需完全退出 DSH 再启动；客户端改动刷新页面即可。
 
 ## 现状
 
