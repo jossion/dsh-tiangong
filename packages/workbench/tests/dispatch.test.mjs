@@ -226,3 +226,33 @@ test('a failed bind keeps the workspace so the retry does not register it twice'
     assert.equal(sessions.calls.ensure.length, 2)
   })
 })
+
+test('a planning turn that overruns gets one reminder, then waits for the hard timeout', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    const sessions = fakeSessions()
+    let clock = 1_000_000
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, planNudgeMs: 60_000, planTimeoutMs: 900_000 },
+      events: log,
+      sessions,
+      now: () => clock,
+    })
+
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'the planning turn is woken')
+    assert.match(sessions.calls.wake[0].text, /workbench_submit_plan/)
+
+    clock += 61_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 2, 'one reminder is sent')
+    assert.match(sessions.calls.wake[1].text, /You have not submitted a plan/)
+
+    clock += 5_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 2, 'the reminder is not repeated')
+  })
+})

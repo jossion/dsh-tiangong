@@ -1531,10 +1531,10 @@ export function apply(ctx, row) {
     ctx.tools.register({
       name: 'workbench_plan_software',
       description:
-        'Plan a small software system from a plain-language requirement. Produces a role and '
-        + 'permission matrix, a data model, an API surface, and an ordered list of build tasks, '
-        + 'written to disk as JSON artefacts. Use this when the user describes a system they want '
-        + 'built. This plans; it does not write application code.',
+        'Legacy host-side planner: plan a small software system from a plain-language requirement '
+        + 'and write roles/design/task artefacts. For a job opened by the Workbench requirement '
+        + 'intake, use workbench_submit_plan instead — that is the closed-loop path. This tool is '
+        + 'the fallback when no delivery session can plan.',
       parameters: {
         type: 'object',
         properties: {

@@ -152,7 +152,8 @@ test('the session controller creates the delivery session with a mounted preset'
     const result = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理' })
     assert.equal(result.ok, true)
     assert.equal(result.sessionId, 'session-abc')
-    assert.equal(result.agentPreset, 'standard', 'the deployment preset is explicit')
+    assert.equal(result.agentPreset, null, 'an unconfigured preset is left to the deployment default')
+    assert.equal(captured[0].agentPreset, undefined, 'the controller mounts the deployment default')
     assert.equal(captured.length, 1)
     assert.equal(captured[0].workspaceId, 'ws_1', 'a registered workspace is addressed by id')
     assert.equal(captured[0].cwd, undefined, 'workspaceId and cwd are mutually exclusive')
@@ -239,6 +240,96 @@ test('without a workspace id the session is created by cwd', async () => {
     await bridge.ensureProjectSession({ id: 'p1' })
     assert.equal(captured[0].cwd, join(dir, 'apps', 'p1'))
     assert.equal(captured[0].workspaceId, undefined)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh session gets the deployment default model selected', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const selected = []
+    const ctx = fakeCtx({
+      agentDefaultModel: {
+        currentSelection() {
+          return { provider: 'deepseek-account', model: 'deepseek-flash', reasoningEffort: 'high' }
+        },
+      },
+      sessionController: {
+        async create() {
+          return { sessionId: 'session-abc' }
+        },
+        async selectModel(request) {
+          selected.push(request)
+          return { selected: { provider: request.provider, model: request.model } }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    const result = await bridge.ensureProjectSession({ id: 'p1' })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.model, { provider: 'deepseek-account', model: 'deepseek-flash' })
+    assert.equal(selected.length, 1)
+    assert.equal(selected[0].sessionId, 'session-abc')
+    assert.equal(selected[0].provider, 'deepseek-account')
+    assert.equal(selected[0].model, 'deepseek-flash')
+    assert.equal(selected[0].reasoningEffort, 'high')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('model selection falls back to the model catalog default', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const selected = []
+    const ctx = fakeCtx({
+      sessionController: {
+        async create() {
+          return { sessionId: 'session-abc' }
+        },
+        async modelCatalog() {
+          return { default: { provider: 'deepseek-account', model: 'deepseek-flash' } }
+        },
+        async selectModel(request) {
+          selected.push(request)
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    const result = await bridge.ensureProjectSession({ id: 'p1' })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.model, { provider: 'deepseek-account', model: 'deepseek-flash' })
+    assert.equal(selected[0].model, 'deepseek-flash')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('waking a session created without a model selects one first', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const order = []
+    const ctx = fakeCtx({
+      agentDefaultModel: { currentSelection: () => ({ provider: 'deepseek-account', model: 'deepseek-flash' }) },
+      sessionController: {
+        async selectModel(request) {
+          order.push(`select:${request.model}`)
+        },
+        async prompt() {
+          order.push('prompt')
+          return { accepted: true }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    const result = await bridge.wake('session-abc', 'go')
+    assert.equal(result.ok, true)
+    assert.deepEqual(order, ['select:deepseek-flash', 'prompt'])
+
+    order.length = 0
+    await bridge.wake('session-abc', 'again')
+    assert.deepEqual(order, ['prompt'], 'the model is selected once per session')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

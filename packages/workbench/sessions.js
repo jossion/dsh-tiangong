@@ -35,6 +35,9 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     }
   }
 
+  /** Sessions this process already ensured a model for. */
+  const modelSelected = new Set()
+
   const dataDir = () => config.dataDir
   const appsRoot = () => (typeof config.appsRoot === 'string' && config.appsRoot.trim() !== ''
     ? config.appsRoot.trim()
@@ -108,6 +111,44 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   }
 
   /**
+   * Select the deployment's default model on a freshly created Session.
+   * A Session only receives a model when the caller installs one; a turn that
+   * starts without it dies in prompt assembly ("{{model}} has no value").
+   */
+  async function selectDefaultModel(controller, sessionId) {
+    if (controller === null || controller === undefined || typeof controller.selectModel !== 'function') return null
+    let selection = null
+    try {
+      const model = optional('agentDefaultModel')
+      if (model !== null && model !== undefined && typeof model.currentSelection === 'function') {
+        selection = model.currentSelection()
+      }
+    } catch {
+      selection = null
+    }
+    if (selection === null || typeof selection.provider !== 'string' || typeof selection.model !== 'string') {
+      try {
+        const catalog = typeof controller.modelCatalog === 'function' ? await controller.modelCatalog() : null
+        selection = catalog?.default ?? null
+      } catch {
+        selection = null
+      }
+    }
+    if (selection === null || typeof selection.provider !== 'string' || typeof selection.model !== 'string') return null
+    try {
+      await controller.selectModel({
+        sessionId,
+        provider: selection.provider,
+        model: selection.model,
+        ...(typeof selection.reasoningEffort === 'string' ? { reasoningEffort: selection.reasoningEffort } : {}),
+      })
+      return { provider: selection.provider, model: selection.model }
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Wake the delivery agent with one user message.
    * `ok:false` is a normal outcome (no session/agent mounted); the dispatcher
    * turns it into a human gate instead of retrying forever.
@@ -121,6 +162,12 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     // the deployment preset, which a raw followup on a hand-built agent lacks.
     const controller = optional('sessionController')
     if (controller !== null && controller !== undefined && typeof controller.prompt === 'function') {
+      // A session created before the model was selected (or created by an older
+      // build of this bridge) must get one before its first turn.
+      if (!modelSelected.has(sessionId)) {
+        await selectDefaultModel(controller, sessionId)
+        modelSelected.add(sessionId)
+      }
       try {
         const receipt = await controller.prompt({
           requestId: randomUUID(),
@@ -168,23 +215,38 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: true, sessionId: project.sessionId, workspace: project.workspace ?? null, created: false }
     }
     const { path, workspaceId } = await ensureWorkspace(project)
+    // An explicit config wins; otherwise let the controller mount the
+    // deployment default preset (which supplies prompt variables such as
+    // {{model}}). Inventing 'standard' skipped that mount.
     const preset = typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
       ? config.agentPreset.trim()
-      : 'standard'
+      : null
     const controller = optional('sessionController')
     if (controller !== null && controller !== undefined && typeof controller.create === 'function') {
       // session.create accepts workspaceId OR cwd, never both.
-      const request = { agentPreset: preset }
+      const request = preset === null ? {} : { agentPreset: preset }
       if (typeof workspaceId === 'string' && workspaceId !== '') request.workspaceId = workspaceId
       else request.cwd = path
+      let created
       try {
-        const created = await controller.create(request)
-        if (typeof created?.sessionId === 'string' && created.sessionId !== '') {
-          return { ok: true, sessionId: created.sessionId, workspace: path, workspaceId, created: true, agentPreset: created.agentPreset ?? preset }
+        created = await controller.create(request)
+        if (typeof created?.sessionId !== 'string' || created.sessionId === '') {
+          throw new Error('session create returned no id')
         }
-        throw new Error('session create returned no id')
       } catch (error) {
         return { ok: false, error: `session create failed: ${String(error?.message ?? error)}`, workspace: path, workspaceId }
+      }
+      // A new Session has no model selected until someone selects one; without
+      // it the deployment prompt has no {{model}} value and the first turn dies.
+      const selected = await selectDefaultModel(controller, created.sessionId)
+      return {
+        ok: true,
+        sessionId: created.sessionId,
+        workspace: path,
+        workspaceId,
+        created: true,
+        agentPreset: created.agentPreset ?? preset,
+        model: selected,
       }
     }
 

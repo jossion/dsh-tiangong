@@ -66,6 +66,7 @@ function factsOf(store, jobId) {
       rounds: 0,
       planning: false,
       planningSince: null,
+      planNudges: 0,
       delivered: false,
       agentStatus: 'idle',
     }
@@ -218,6 +219,23 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
         if (work.length === 0) return
         const text = wakeText({ job, work })
         await wakeJob(project, job, text, { mode: 'dispatch' })
+        return
+      }
+      case 'wait': {
+        // A planning turn that is taking too long gets one explicit reminder
+        // before the hard plan-timeout hands the job to a person.
+        if (action.reason === 'planning' && job.planBy === null) {
+          const since = facts.planningSince ?? now()
+          const nudgeMs = Number(config.planNudgeMs) > 0 ? Number(config.planNudgeMs) : 120_000
+          if (now() - since >= nudgeMs && (facts.planNudges ?? 0) < 1) {
+            facts.planNudges = 1
+            await wakeJob(project, job, [
+              `You have not submitted a plan for job ${job.id} yet.`,
+              'Call workbench_submit_plan now: one DAG of work items (id, title, owner, stage, blockedBy).',
+              'Do not implement anything and do not reply with prose only.',
+            ].join('\n'), { mode: 'plan-nudge' })
+          }
+        }
         return
       }
       case 'human-gate': {
