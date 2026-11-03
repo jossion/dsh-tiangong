@@ -176,8 +176,8 @@ findskill { query, taskId? }
 | **D** ✅ | `sessions.js`：项目专属会话 + 工作区、agent 创建/恢复、`followup` 唤醒、消息形状对齐宿主的 `user/message` | 无宿主服务时干净降级并落 human 卡点 |
 | **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
 | **G** ✅ | 面板：创建应用文案、需求文档上传、任务卡自动状态、显示名天工 | headless Chromium 截图复验（面板/任务/对话框/附件） |
-| **H** 🟡 | 已做：token 记账（`usage` 事件、job 投影、token 预算熔断）、卡死看门狗（连续唤醒无进展 → 人工卡点）、连接 fence/路径沙箱/store 损坏保护、Dialog 可达性 | 257 用例；真机重启后生效 |
-| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 价格配置、旧项目清理 | 需要先核对 subagent provider 契约；blocked 卡已改为人工卡点 |
+| **H** ✅ | token 记账（`usage` 事件、job 投影、token 预算熔断）、卡死看门狗、blocked→人工卡点、连接 fence/路径沙箱/store 保护、Dialog 可达性 | 259 用例 + 真机 `98,730 tokens` 记账与卡片展示 |
+| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 单价配置、旧项目清理、`export const Config`（schemastery 在本工作区 link 路径下不可裸解析，需宿主侧解析方案） | 已知官方约定缺口，不影响闭环 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）
 
@@ -216,6 +216,13 @@ findskill { query, taskId? }
 
 排查工具：`workbench_delivery_diagnostics`（只读）返回服务挂载、解析到的预设、选中的模型与每步错误；
 每次 `dispatch` 事件也会带 `preparation` 报告，卡住时先看账本再看它。
+
+**H 轮真机复验（同日）**：面板创建的 `用量验证` 项目自动完成 3/3 交付，账本记录 9 条
+`usage` 行、累计 98,730 tokens，任务卡显示 `98730 tokens`；同轮还验证了证据门把
+「报 done 但零测试」降级为 blocked、以及 `passed/failed` 别名不再被读成零测试。
+
+已知官方约定缺口（不影响闭环，列入 H2）：未导出 `export const Config`（需要 Schemastery，
+而本包以 `link:` 挂在工作区、裸导入解析不到宿主依赖）；持久化仍是自写 JSON，未迁 `ctx.storageDomain`。
 
 ## 14. 命名
 
