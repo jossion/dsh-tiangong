@@ -37,10 +37,18 @@ export function createStore(dataDir) {
       cache.set(name, rows)
       return rows
     } catch (err) {
-      if (err && (err.code === 'ENOENT' || err instanceof SyntaxError)) {
+      if (err && err.code === 'ENOENT') {
         const rows = []
         cache.set(name, rows)
         return rows
+      }
+      if (err instanceof SyntaxError) {
+        // A truncated or hand-edited collection is not an empty one. Treating
+        // it as empty would persist that lie over the user's data on the next
+        // write, so move the file aside and fail loudly instead.
+        const backup = `${file(name)}.corrupt-${Date.now()}`
+        await rename(file(name), backup).catch(() => {})
+        throw new Error(`collection ${name} is corrupt; moved to ${backup}`)
       }
       throw err
     }
@@ -86,7 +94,12 @@ export function createStore(dataDir) {
   const store = {
     /** Serialized so concurrent callers share one initialisation. */
     init() {
-      ready ??= ensure()
+      // A failed load (a corrupt collection) must not poison the instance
+      // forever: the bad file is moved aside, so the next call can retry.
+      ready ??= ensure().catch(error => {
+        ready = null
+        throw error
+      })
       return ready
     },
 

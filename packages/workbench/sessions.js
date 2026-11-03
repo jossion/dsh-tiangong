@@ -142,24 +142,13 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: true, sessionId: project.sessionId, workspace: project.workspace ?? null, created: false }
     }
     const { path, workspaceId } = await ensureWorkspace(project)
-    const sessions = optional('sessions')
     const agents = optional('agents')
-    if (sessions === undefined || sessions === null || typeof sessions.create !== 'function') {
-      return { ok: false, error: 'sessions service unavailable', workspace: path, workspaceId }
-    }
     if (agents === undefined || agents === null || typeof agents.create !== 'function') {
       return { ok: false, error: 'agents service unavailable', workspace: path, workspaceId }
     }
-    let session
-    try {
-      session = sessions.create()
-    } catch (error) {
-      return { ok: false, error: `session create failed: ${String(error?.message ?? error)}`, workspace: path, workspaceId }
-    }
-    const sessionId = session?.id
-    if (typeof sessionId !== 'string' || sessionId === '') {
-      return { ok: false, error: 'session create returned no id', workspace: path, workspaceId }
-    }
+    // `agents.create` constructs the agent AND its session; pre-creating the
+    // session makes the factory reject with "session already exists".
+    const sessionId = `session-${randomUUID()}`
     const options = { sessionId, meta: { cwd: path } }
     if (typeof config.agentPreset === 'string' && config.agentPreset.trim() !== '') {
       options.meta.agentPreset = config.agentPreset.trim()

@@ -15,9 +15,11 @@
  * still activates in a profile that lacks them.
  */
 import { existsSync, statSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, isAbsolute } from 'node:path'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog, summarize } from './events.js'
@@ -139,10 +141,50 @@ function isSameOrigin(request) {
   }
 }
 
+/**
+ * The host's own trust fence for raw web routes. `webServer` hands us the full
+ * request/response; only `connection` knows the browser authentication and
+ * Host/Origin policy, so every route asks it before touching the ledger.
+ *
+ * A profile without the connection service keeps its old same-origin check:
+ * that is a degraded host, not a reason to stop serving the panel.
+ */
+function connectionDenied(ctx, request) {
+  try {
+    const connection = typeof ctx.get === 'function' ? ctx.get('connection') : undefined
+    if (connection === null || connection === undefined || typeof connection.requestRejection !== 'function') return false
+    const rejection = connection.requestRejection(request)
+    return rejection !== null && rejection !== undefined && rejection !== false
+  } catch {
+    return false
+  }
+}
+
+/** Roots a path-sensitive route may touch: home, the data dir, DSH workspaces. */
+function allowedRoots(ctx, config) {
+  const roots = [homedir(), config.dataDir]
+  try {
+    const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined
+    const list = registry !== null && registry !== undefined && typeof registry.list === 'function' ? registry.list() : []
+    for (const workspace of Array.isArray(list) ? list : []) {
+      if (typeof workspace?.path === 'string' && workspace.path !== '') roots.push(workspace.path)
+    }
+  } catch {
+    /* no registry: home and the data dir are still allowed */
+  }
+  return roots.filter(root => typeof root === 'string' && root !== '').map(root => resolve(root))
+}
+
+/** Is `target` inside one of the allowed roots (or equal to one)? */
+function pathAllowed(target, roots) {
+  const resolved = resolve(target)
+  return roots.some(root => resolved === root || resolved.startsWith(`${root}${sep}`))
+}
+
 export const pickScript = (kind, prompt) => {
   // AppleScript strings have no backslash escape: keep quotes and control
   // characters out of the prompt rather than trying to escape them.
-  const safe = String(prompt ?? '').replace(/["\\\n\r\t]/g, ' ').slice(0, 120)
+  const safe = String(prompt ?? '').replace(/["\\`$\n\r\t]/g, ' ').slice(0, 120)
   if (process.platform === 'darwin') {
     const verb = kind === 'directory' ? 'choose folder' : 'choose file'
     return { file: 'osascript', args: ['-e', `POSIX path of (${verb} with prompt "${safe}")`] }
@@ -493,6 +535,10 @@ export function apply(ctx, row) {
         sendJson(response, 400, { error: { code: 'bad-workspace', message: 'workspace must be an existing absolute directory' } })
         return
       }
+      if (!pathAllowed(workspace, allowedRoots(ctx, config))) {
+        sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${workspace}` } })
+        return
+      }
       await events.append(projectEvent({ projectId, workspace, event: 'config', ts: new Date().toISOString() }))
       sendJson(response, 200, { projectId, workspace })
     },
@@ -617,6 +663,10 @@ export function apply(ctx, row) {
           sendJson(response, 400, { error: { code: 'bad-workspace', message: 'workspace must be an existing absolute directory' } })
           return
         }
+        if (workspace !== '' && !pathAllowed(workspace, allowedRoots(ctx, config))) {
+          sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${workspace}` } })
+          return
+        }
         patch.workspace = workspace === '' ? null : workspace
       }
       if (body?.workspaceId !== undefined) {
@@ -669,6 +719,10 @@ export function apply(ctx, row) {
         const serviceId = String(body?.serviceId ?? '')
         const action = String(body?.action ?? '')
         if (action === 'start') {
+          if (!pathAllowed(workspace, allowedRoots(ctx, config))) {
+            sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${workspace}` } })
+            return
+          }
           const result = await startService(workspace, String(body?.projectId ?? ''), serviceId)
           sendJson(response, 200, { data: result })
           return
@@ -962,6 +1016,10 @@ export function apply(ctx, row) {
               sendJson(response, 400, { error: { code: 'bad-request', message: 'dbPath must be an absolute path' } })
               return
             }
+            if (!pathAllowed(dbPath, allowedRoots(ctx, config))) {
+              sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${dbPath}` } })
+              return
+            }
             try {
               // Validate by reading, not by inspecting: a valid SQLite file
               // without a `finance` table is still the wrong database.
@@ -977,6 +1035,10 @@ export function apply(ctx, row) {
           const dir = expandHome(body?.dir)
           if (dir === '' || !isAbsolute(dir)) {
             sendJson(response, 400, { error: { code: 'bad-request', message: 'dir must be an absolute path' } })
+            return
+          }
+          if (!pathAllowed(dir, allowedRoots(ctx, config))) {
+            sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${dir}` } })
             return
           }
           try {
@@ -1231,6 +1293,10 @@ export function apply(ctx, row) {
       }
       const body = await readJsonBody(request).catch(() => ({}))
       const requested = typeof body?.path === 'string' && body.path !== '' ? expandHome(body.path) : homedir()
+      if (!pathAllowed(requested, allowedRoots(ctx, config))) {
+        sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${requested}` } })
+        return
+      }
       try {
         const info = await stat(requested)
         if (!info.isDirectory()) throw new Error('not a directory')
@@ -1401,22 +1467,37 @@ export function apply(ctx, row) {
       if (!webServer || typeof webServer.register !== 'function') {
         return () => {}
       }
+      // The fence goes on every route: a handler that skips it would be the
+      // one endpoint a tunneled or cross-origin request could reach.
+      const fencedRoute = candidate => ({
+        ...candidate,
+        handler: (request, response) => {
+          if (connectionDenied(ctx, request)) {
+            sendJson(response, 403, {
+              error: { code: 'untrusted-connection', message: 'request rejected by the host connection policy' },
+            })
+            return
+          }
+          return candidate.handler(request, response)
+        },
+      })
+      const register = candidate => webServer.register(fencedRoute(candidate))
       const disposers = [
-        webServer.register(route),
-        webServer.register(startRoute),
-        webServer.register(projectsRoute),
-        webServer.register(controlRoute),
-        webServer.register(decideRoute),
-        webServer.register(requirementsRoute),
-        webServer.register(configRoute),
-        webServer.register(employeesRoute),
-        webServer.register(servicesRoute),
-        webServer.register(orgRoute),
-        webServer.register(pickRoute),
-        webServer.register(browseRoute),
-        webServer.register(jobConfigRoute),
-        webServer.register(financeRoute),
-        webServer.register(taskRoute),
+        register(route),
+        register(startRoute),
+        register(projectsRoute),
+        register(controlRoute),
+        register(decideRoute),
+        register(requirementsRoute),
+        register(configRoute),
+        register(employeesRoute),
+        register(servicesRoute),
+        register(orgRoute),
+        register(pickRoute),
+        register(browseRoute),
+        register(jobConfigRoute),
+        register(financeRoute),
+        register(taskRoute),
       ]
       return () => {
         disposeAll()

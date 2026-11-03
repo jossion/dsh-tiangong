@@ -30,19 +30,12 @@ test('a wake message has the shape the session log stores', () => {
 test('the first requirement creates one session, one agent and a workspace', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
   try {
-    const created = { sessions: 0, agents: [] }
+    const created = { agents: [] }
     const ctx = fakeCtx({
-      sessions: {
-        create() {
-          created.sessions += 1
-          return { id: 'sess-1' }
-        },
-        async flush() {},
-      },
       agents: {
         async create(options) {
           created.agents.push(options)
-          return { agent: { id: 'sess-1' } }
+          return { agent: { id: options.sessionId } }
         },
       },
     })
@@ -56,24 +49,22 @@ test('the first requirement creates one session, one agent and a workspace', asy
     const result = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理' })
     assert.equal(result.ok, true)
     assert.equal(result.created, true)
-    assert.equal(result.sessionId, 'sess-1')
+    assert.match(result.sessionId, /^session-[0-9a-f-]{36}$/)
     assert.equal(result.workspace, join(dir, 'apps', 'p1'))
     assert.equal(result.workspaceId, null, 'no registry service: no workspace id, path still created')
     await stat(join(dir, 'apps', 'p1'))
 
-    assert.equal(created.sessions, 1)
     assert.equal(created.agents.length, 1)
     const options = created.agents[0]
-    assert.equal(options.sessionId, 'sess-1')
+    assert.equal(options.sessionId, result.sessionId, 'the factory creates the session it is given')
     assert.equal(options.meta.cwd, join(dir, 'apps', 'p1'))
     assert.equal(options.meta.agentPreset, 'agent-team')
     assert.deepEqual(options.agentOptions, { provider: 'deepseek', model: 'flash' })
 
-    // A project that already has a session reuses it: no second session/agent.
-    const again = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理', sessionId: 'sess-1' })
+    // A project that already has a session reuses it: no second agent.
+    const again = await bridge.ensureProjectSession({ id: 'p1', title: '公司管理', sessionId: result.sessionId })
     assert.equal(again.ok, true)
     assert.equal(again.created, false)
-    assert.equal(created.sessions, 1)
     assert.equal(created.agents.length, 1)
   } finally {
     await rm(dir, { recursive: true, force: true })
@@ -91,7 +82,7 @@ test('a project session degrades to a reported error without host services', asy
     })
     const result = await bridge.ensureProjectSession({ id: 'p1' })
     assert.equal(result.ok, false)
-    assert.match(result.error, /sessions service unavailable/)
+    assert.match(result.error, /agents service unavailable/)
     // The workspace path is still prepared so a later restart needs no migration.
     assert.equal(result.workspace, join(dir, 'apps', 'p1'))
     await stat(join(dir, 'apps', 'p1'))

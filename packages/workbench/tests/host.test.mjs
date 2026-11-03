@@ -53,7 +53,7 @@ function fakeLlm() {
   }
 }
 
-function fakeContext({ withWebServer = true, withLlm = true } = {}) {
+function fakeContext({ withWebServer = true, withLlm = true, connection = null } = {}) {
   const routes = []
   const tools = []
   const disposers = []
@@ -81,7 +81,8 @@ function fakeContext({ withWebServer = true, withLlm = true } = {}) {
 
   const ctx = {
     // A one-shot read during apply must find nothing, like the real thing.
-    get() {
+    get(name) {
+      if (name === 'connection' && connection !== null) return connection
       throw new Error('cannot get property "webServer" without inject')
     },
     inject(deps, callback) {
@@ -884,7 +885,9 @@ test('the finance page can read the app ledger database instead of CSV files', a
     assert.equal(JSON.parse(refused.body).error.code, 'not-applicable')
 
     const bad = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-source', source: 'sqlite', dbPath: '/tmp/nope.db' }), bad)
+    // An allowed path that is not a finance database: rejected by the reader,
+    // not by the path fence.
+    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-source', source: 'sqlite', dbPath: join(dataDir, 'nope.db') }), bad)
     assert.equal(bad.status, 400)
     assert.equal(JSON.parse(bad.body).error.code, 'bad-database')
   })
@@ -1273,4 +1276,54 @@ test('skill discovery degrades cleanly when no skill service is mounted', async 
 
     await assert.rejects(() => find.execute({ query: '   ' }), /query is required/)
   })
+})
+
+test('every route is fenced by the host connection policy', async () => {
+  await withDataDir(async dataDir => {
+    const connection = {
+      requestRejection: request => (request?.headers?.['x-untrusted'] === '1' ? { code: 'denied' } : undefined),
+    }
+    const { ctx, routes } = fakeContext({ connection })
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+
+    const denied = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '被拒' }, { 'x-untrusted': '1' }), denied)
+    assert.equal(denied.status, 403)
+    assert.equal(JSON.parse(denied.body).error.code, 'untrusted-connection')
+
+    const allowed = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '放行' }), allowed)
+    assert.equal(allowed.status, 201, 'a trusted request is unaffected')
+  })
+})
+
+test('path-sensitive routes stay inside the allowed roots', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+
+    const browseRoute = routes.find(route => route.path === BROWSE_PATH)
+    const outside = fakeResponse()
+    await browseRoute.handler(postRequest({ path: '/etc' }), outside)
+    assert.equal(outside.status, 403)
+    assert.equal(JSON.parse(outside.body).error.code, 'path-not-allowed')
+
+    const configRoute = routes.find(route => route.path === CONFIG_PATH)
+    const refused = fakeResponse()
+    await configRoute.handler(postRequest({ projectId: 'p1', workspace: '/etc' }), refused)
+    assert.equal(refused.status, 403)
+    assert.equal(JSON.parse(refused.body).error.code, 'path-not-allowed')
+
+    // Inside the data dir is allowed.
+    const inside = fakeResponse()
+    await browseRoute.handler(postRequest({ path: dataDir }), inside)
+    assert.equal(inside.status, 200)
+  })
+})
+
+test('the picker prompt cannot inject a PowerShell expression', () => {
+  const script = pickScript('directory', '$(Start-Process calc)')
+  assert.equal(script.file, 'osascript')
+  assert.ok(!script.args.join(' ').includes('$'), 'dollar signs are stripped from the prompt')
 })
