@@ -1328,3 +1328,34 @@ test('the picker prompt cannot inject a PowerShell expression', () => {
   assert.equal(script.file, 'osascript')
   assert.ok(!script.args.join(' ').includes('$'), 'dollar signs are stripped from the prompt')
 })
+
+test('a done report accepts passed/failed aliases as real test evidence', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '公司管理' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '员工管理' }))
+    const submit = tools.find(tool => tool.name === 'workbench_submit_plan')
+    await submit.execute({
+      jobId: 'j1',
+      brief: '员工管理',
+      tasks: [{ id: 'db', title: '建员工表', owner: 'backend', stage: 'build' }],
+    })
+    const report = tools.find(tool => tool.name === 'workbench_report_work')
+    const result = JSON.parse(await report.execute({
+      taskId: 'j1:wi:db',
+      event: 'done',
+      files: ['db.sql'],
+      exitCode: 0,
+      passed: 3,
+      failed: 0,
+      notes: 'green',
+    }))
+    assert.equal(result.recorded, 'done', 'aliases count as the same machine evidence')
+
+    const board = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    const job = board.projects[0].jobs[0]
+    assert.equal(job.progress.done, 1)
+  })
+})

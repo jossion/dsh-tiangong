@@ -28,6 +28,8 @@ export const DEFAULT_LOOP = {
 }
 
 const TERMINAL = new Set(['done', 'failed'])
+/** Cards a machine may not pick up: done/failed are terminal, blocked needs a person. */
+const NOT_READY = new Set(['done', 'failed', 'blocked', 'paused', 'cancelled'])
 const DISPATCHABLE = new Set(['build', 'verify'])
 const INTERRUPTED = new Set(['paused', 'cancelled'])
 
@@ -62,8 +64,7 @@ export function readyLeaves(roots, gates = []) {
   return leavesOf(roots).filter(task => (
     task !== null
     && typeof task === 'object'
-    && !TERMINAL.has(task.status)
-    && !INTERRUPTED.has(task.status)
+    && !NOT_READY.has(task.status)
     && DISPATCHABLE.has(task.stage)
     && task.owner !== null
     && task.owner !== undefined
@@ -77,11 +78,13 @@ function countLeaves(roots) {
   const leaves = leavesOf(roots)
   let done = 0
   let failed = 0
+  let blocked = 0
   for (const leaf of leaves) {
     if (leaf.status === 'done') done += 1
     if (leaf.status === 'failed') failed += 1
+    if (leaf.status === 'blocked') blocked += 1
   }
-  return { total: leaves.length, done, failed, pending: leaves.length - done - failed }
+  return { total: leaves.length, done, failed, blocked, pending: leaves.length - done - failed }
 }
 
 /**
@@ -110,6 +113,7 @@ export function snapshotOf({ job, runtime = {}, config = {}, now = Date.now() })
       done: counted.done,
       total: counted.total,
       failed: counted.failed,
+      blocked: counted.blocked,
       pending: counted.pending,
     },
     ready: {
@@ -203,6 +207,9 @@ export function nextStep(snapshot) {
   // Nothing dispatchable: explain why, in the order a person would ask.
   if (gates.blocking > 0) return { action: 'human-gate', reason: 'approval', jobId: job.id, gates: gates.blocking }
   if (progress.failed > 0) return { action: 'human-gate', reason: 'failed', jobId: job.id, failed: progress.failed }
+  // A card whose "done" claim had no green tests is blocked, not done. With no
+  // other card to run, only a person can decide how to proceed.
+  if (progress.blocked > 0) return { action: 'human-gate', reason: 'blocked', jobId: job.id, blocked: progress.blocked }
   return { action: 'wait', reason: progress.pending > 0 ? 'dependencies' : 'no-work', jobId: job.id }
 }
 

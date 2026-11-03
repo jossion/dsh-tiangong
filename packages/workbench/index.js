@@ -1122,8 +1122,8 @@ export function apply(ctx, row) {
             notes: String(input?.notes ?? ''),
             tests: {
               exitCode: Number(input?.exitCode ?? 0),
-              passed: Number(input?.testsPassed ?? 0),
-              failed: Number(input?.testsFailed ?? 0),
+              passed: Number(input?.testsPassed ?? input?.passed ?? 0),
+              failed: Number(input?.testsFailed ?? input?.failed ?? 0),
             },
             ts: new Date().toISOString(),
           },
@@ -1977,7 +1977,8 @@ export function apply(ctx, row) {
       description:
         'Record the result of one work item after a child agent finished it. Appends the task '
         + 'transition, the produced files, and the decisions the child made to the project ledger. '
-        + 'A report of done without green tests is recorded as blocked and lands on a person.',
+        + 'A report of done without green tests is recorded as blocked and lands on a person. '
+        + 'Test evidence uses testsPassed/testsFailed: a done report needs a real exit code, a positive pass count and zero failures.',
       parameters: {
         type: 'object',
         properties: {
@@ -2024,8 +2025,8 @@ export function apply(ctx, row) {
             notes: String(input?.notes ?? ''),
             tests: {
               exitCode: Number(input?.exitCode ?? 0),
-              passed: Number(input?.testsPassed ?? 0),
-              failed: Number(input?.testsFailed ?? 0),
+              passed: Number(input?.testsPassed ?? input?.passed ?? 0),
+              failed: Number(input?.testsFailed ?? input?.failed ?? 0),
             },
             ts: new Date().toISOString(),
           },

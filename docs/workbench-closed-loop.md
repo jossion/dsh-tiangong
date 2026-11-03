@@ -177,7 +177,7 @@ findskill { query, taskId? }
 | **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
 | **G** ✅ | 面板：创建应用文案、需求文档上传、任务卡自动状态、显示名天工 | headless Chromium 截图复验（面板/任务/对话框/附件） |
 | **H** 🟡 | 已做：token 记账（`usage` 事件、job 投影、token 预算熔断）、卡死看门狗（连续唤醒无进展 → 人工卡点）、连接 fence/路径沙箱/store 损坏保护、Dialog 可达性 | 257 用例；真机重启后生效 |
-| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 价格配置、旧项目清理 | 需要先核对 subagent provider 契约 |
+| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 价格配置、旧项目清理 | 需要先核对 subagent provider 契约；blocked 卡已改为人工卡点 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）
 

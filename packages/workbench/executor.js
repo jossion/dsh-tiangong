@@ -102,7 +102,9 @@ export function readyWork(board, { projectId = null, jobId = null, limit = 3 } =
   const items = []
   walk(scopeRoots, task => {
     if (task.children.length > 0) return
-    if (task.status === 'done' || task.status === 'failed') return
+    // A blocked card reported "done" with no green tests; it must not be handed
+    // out again as ready work, or the loop would retry it forever.
+    if (task.status === 'done' || task.status === 'failed' || task.status === 'blocked') return
     if (task.stage !== 'build' && task.stage !== 'verify') return
     if (task.openBlockers.length > 0) return
     if (task.owner === null || task.owner === 'workbench') return

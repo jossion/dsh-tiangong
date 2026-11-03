@@ -219,3 +219,10 @@ test('a token budget hands the job to a person', () => {
   assert.equal(action.action, 'human-gate')
   assert.equal(action.reason, 'budget-tokens')
 })
+
+test('a blocked card reaches a person when nothing else can run', () => {
+  const action = nextStep(snapshot({ job: { roots: [task('a', { status: 'blocked' })] } }))
+  assert.equal(action.action, 'human-gate')
+  assert.equal(action.reason, 'blocked')
+  assert.equal(action.blocked, 1)
+})
