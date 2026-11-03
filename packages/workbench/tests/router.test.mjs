@@ -88,8 +88,27 @@ test('decide() fills the policy fields the panel reads', () => {
   assert.equal(event.irreversible, false)
   assert.deepEqual(Object.keys(event).sort(), [
     'action', 'confidence', 'costUsd', 'decision', 'evidence', 'group',
-    'irreversible', 'lane', 'question', 'rule', 'runId', 'status', 'task', 'value',
+    'irreversible', 'jobId', 'lane', 'owner', 'projectId', 'question', 'rule',
+    'runId', 'stage', 'status', 'task', 'taskId', 'value',
   ])
+})
+
+test('decide() carries the team attribution the board needs', () => {
+  const event = decide('which_file', {
+    value: 'src/auth.ts',
+    confidence: 0.94,
+    projectId: 'prj_1',
+    taskId: 'task_7',
+    stage: 'build',
+    owner: 'frontend',
+  })
+  assert.equal(event.projectId, 'prj_1')
+  assert.equal(event.taskId, 'task_7')
+  assert.equal(event.stage, 'build')
+  assert.equal(event.owner, 'frontend')
+
+  const anonymous = decide('which_file', { value: 'a' })
+  assert.equal(anonymous.taskId, null, 'an unattributed decision is explicit, not missing')
 })
 
 test('decide() parks a human decision as waiting and flags the action', () => {

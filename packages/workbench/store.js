@@ -8,7 +8,16 @@
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 
-const COLLECTIONS = ['staff', 'ledger', 'deliveries']
+// `ledger` stays for an older shape of the data; finance writes its own rows so
+// a statement import cannot collide with whatever the ledger collection held.
+const COLLECTIONS = [
+  'staff',
+  'ledger',
+  'deliveries',
+  'financeConfig',
+  'financeImports',
+  'financeTransactions',
+]
 
 export function createStore(dataDir) {
   /** @type {Map<string, any[]>} */
@@ -49,10 +58,24 @@ export function createStore(dataDir) {
 
   async function persist(name) {
     const rows = cache.get(name) ?? []
-    const tmp = `${file(name)}.tmp`
-    await writeFile(tmp, `${JSON.stringify(rows, null, 2)}\n`, 'utf8')
-    await rename(tmp, file(name))
-    notify()
+    // A per-write temp name: two persists of the same collection can overlap
+    // (a background run finishing during teardown), and a shared `.tmp` path
+    // makes the second rename fail with ENOENT — a flaky test, not a data bug.
+    const tmp = `${file(name)}.${process.pid}.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 6)}.tmp`
+    const body = `${JSON.stringify(rows, null, 2)}\n`
+    // A late write (a background run finishing after its directory was
+    // cleaned up) must not turn into an unhandled crash: recreate, retry once.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await writeFile(tmp, body, 'utf8')
+        await rename(tmp, file(name))
+        notify()
+        return
+      } catch (error) {
+        if (attempt === 1) throw error
+        await mkdir(dataDir, { recursive: true }).catch(() => {})
+      }
+    }
   }
 
   async function ensure() {
@@ -84,6 +107,25 @@ export function createStore(dataDir) {
       rows.push(record)
       await persist(name)
       return record
+    },
+
+    /**
+     * Append many rows with one write.
+     *
+     * A bank statement is thousands of lines: `add()` in a loop would rewrite
+     * the whole JSON file once per row, which turns a 3k-line import into a
+     * multi-second stall. One persist keeps it linear.
+     */
+    async addMany(name, newRows) {
+      await store.init()
+      const rows = await load(name)
+      const records = newRows.map(row => ({
+        id: row.id ?? `${name}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+        ...row,
+      }))
+      rows.push(...records)
+      if (records.length > 0) await persist(name)
+      return records
     },
 
     async update(name, id, patch) {

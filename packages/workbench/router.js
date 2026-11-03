@@ -164,6 +164,10 @@ export function riskConfidence(score) {
  * @param {number} [input.costUsd]
  * @param {string} [input.status] `ok` | `waiting` | `failed`
  * @param {object} [input.evidence]
+ * @param {string} [input.projectId] which project the judgement belongs to
+ * @param {string} [input.taskId] which board task it was made for
+ * @param {string} [input.stage] pipeline stage (`brief` … `report`)
+ * @param {string} [input.owner] which agent made it
  */
 export function decide(key, input = {}) {
   const definition = DECISIONS.find(entry => entry.key === key)
@@ -190,5 +194,13 @@ export function decide(key, input = {}) {
     costUsd: Number.isFinite(Number(input.costUsd)) ? Number(input.costUsd) : 0,
     status: input.status ?? (lane === 'human' ? 'waiting' : 'ok'),
     evidence: input.evidence ?? null,
+    // Attribution. A single agent's judgement is auditable with `rule` alone;
+    // a team's is not — the board has to say whose judgement it was, for which
+    // task, so a wrong call can be traced to a role instead of "the system".
+    projectId: input.projectId ?? null,
+    jobId: input.jobId ?? null,
+    taskId: input.taskId ?? null,
+    stage: input.stage ?? null,
+    owner: input.owner ?? null,
   }
 }

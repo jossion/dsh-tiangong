@@ -39,11 +39,27 @@ export function parseLines(text) {
 }
 
 /**
+ * Whether one log line is a decision record.
+ *
+ * The log now also carries the board's task life-cycle (`kind: 'task'`),
+ * artefacts and approval requests, because the project board and the decision
+ * panel are two projections of one file. Lines written before `kind` existed
+ * are decisions, which is what keeps an old log readable.
+ */
+export function isDecision(event) {
+  return event !== null && typeof event === 'object' && (event.kind === undefined || event.kind === 'decision')
+}
+
+/**
  * Aggregates one event list into the shape the panel renders.
  * Pure, so it is tested against fixtures instead of a live server.
+ *
+ * Only decision lines count: task/artefact/approval lines share the file but
+ * are a different projection (see `projects.js`).
  */
 export function summarize(events) {
-  const list = Array.isArray(events) ? events : []
+  const all = Array.isArray(events) ? events : []
+  const list = all.filter(isDecision)
   const laneCounts = { code: 0, frontier: 0, human: 0 }
   const forks = new Set()
   const held = []

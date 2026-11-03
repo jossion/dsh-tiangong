@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Workbench · 开发流水线预览</title>
+<style>
+  :root {
+    --bg: #0d1017; --layer: #151a23; --layer2: #1b2230; --line: #232a36;
+    --text: #e6edf3; --muted: #8b949e; --dim: #5b6675;
+    --code: #2ea043; --frontier: #d29922; --human: #f85149;
+    --accent: #c9245a; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 40px; background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+  }
+  .muted { color: var(--muted); } .dim { color: var(--dim); }
+  h1 { margin: 0; font-size: 26px; letter-spacing: -.5px; font-weight: 700; }
+  h1 .thin { color: var(--muted); font-weight: 400; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+  /* ─ header ─ */
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+  .kpis { display: flex; gap: 26px; text-align: right; }
+  .kpi .v { font-size: 20px; font-weight: 700; letter-spacing: -.5px; }
+  .kpi .k { font-size: 10px; color: var(--muted); letter-spacing: 1.4px; text-transform: uppercase; }
+  .live { color: var(--accent); }
+
+  /* ─ pipeline ─ */
+  .rail { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; margin: 26px 0 8px; position: relative; }
+  .stage { position: relative; padding-right: 10px; }
+  .stage .card {
+    border: 1px solid var(--line); background: var(--layer); border-radius: 9px;
+    padding: 11px 12px; margin-right: 12px; height: 100%;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .stage.done .card { border-color: #2a3a2f; }
+  .stage.active .card { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(201,36,90,.35), 0 0 26px rgba(201,36,90,.18); }
+  .stage.active::after {
+    content: ''; position: absolute; left: 0; right: 12px; bottom: -9px; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  }
+  .stage .top { display: flex; align-items: center; gap: 7px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
+  .dot.ok { background: var(--code); } .dot.run { background: var(--accent); box-shadow: 0 0 8px var(--accent); } .dot.wait { background: var(--frontier); }
+  .stage .name { font-weight: 600; font-size: 13px; }
+  .stage .idx { margin-left: auto; font-size: 10px; color: var(--dim); }
+  .stage .meta { display: flex; gap: 8px; font-size: 10px; color: var(--muted); }
+  .stage .art { font-size: 11px; color: var(--text); }
+  .stage .art b { color: var(--muted); font-weight: 400; }
+  .bar { display: flex; height: 3px; border-radius: 2px; overflow: hidden; background: var(--line); }
+  .bar span { display: block; height: 100%; }
+  .arrow { position: absolute; right: 2px; top: 22px; color: var(--dim); font-size: 11px; }
+
+  /* ─ body grid ─ */
+  .grid { display: grid; grid-template-columns: 1fr 330px; gap: 18px; margin-top: 22px; }
+  .panel { border: 1px solid var(--line); background: var(--layer); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { margin: 0 0 4px; font-size: 12px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .panel .hint { font-size: 11px; color: var(--dim); margin-bottom: 10px; }
+
+  /* decision rows */
+  .drow { display: grid; grid-template-columns: 128px 1fr 96px 64px 54px; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .drow:first-of-type { border-top: 0; }
+  .dname { color: var(--text); font-size: 12px; }
+  .dval { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dval b { color: var(--text); font-weight: 500; }
+  .drule { font-size: 10px; color: var(--dim); }
+  .conf { display: flex; align-items: center; gap: 6px; }
+  .conf .track { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .conf .fill { height: 100%; }
+  .conf .num { font-size: 11px; color: var(--muted); width: 28px; text-align: right; }
+  .lane { font-size: 10px; text-align: right; }
+  .lane.code { color: var(--code); } .lane.frontier { color: var(--frontier); } .lane.human { color: var(--human); }
+
+  /* human queue */
+  .gate { border: 1px solid #35242a; background: #1a1418; border-radius: 8px; padding: 10px; margin-top: 9px; }
+  .gate .t { font-size: 12px; color: var(--text); }
+  .gate .why { font-size: 10px; color: var(--human); margin-top: 3px; }
+  .gate .acts { display: flex; gap: 6px; margin-top: 9px; }
+  .btn { font: inherit; font-size: 11px; padding: 4px 10px; border-radius: 5px; border: 1px solid var(--line);
+         background: var(--layer2); color: var(--text); cursor: pointer; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn[disabled] { opacity: .35; cursor: not-allowed; }
+
+  /* timeline */
+  .feed { margin-top: 18px; }
+  .frow { display: grid; grid-template-columns: 58px 8px 1fr; gap: 10px; align-items: baseline; padding: 5px 0; }
+  .frow .ts { color: var(--dim); font-size: 11px; }
+  .frow .what { font-size: 12px; }
+  .frow .what em { font-style: normal; color: var(--muted); }
+  .foot { margin-top: 18px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>开发流水线 <span class="thin">/ 报价单系统</span></h1>
+    <div class="sub">一个需求从「说清楚」到「交付报告」的六个阶段 · 每个判断都有证据、置信度和泳道</div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="v">3<span class="dim">/6</span></div><div class="k">stages</div></div>
+    <div class="kpi"><div class="v">10</div><div class="k">decisions</div></div>
+    <div class="kpi"><div class="v" style="color:var(--human)">2</div><div class="k">held for you</div></div>
+    <div class="kpi"><div class="v">$0.0042</div><div class="k">spent</div></div>
+    <div class="kpi"><div class="v live">● LIVE</div><div class="k">20:14 运行中</div></div>
+  </div>
+</header>
+
+<div class="rail" id="rail"></div>
+
+<div class="grid">
+  <div>
+    <div class="panel">
+      <h2>当前阶段 · 实现 build</h2>
+      <div class="hint">这一阶段产生的 6 个判断，从左到右按发生顺序；置信度只来自机器证据。</div>
+      <div id="decisions"></div>
+    </div>
+
+    <div class="panel feed">
+      <h2>事件流 · 最新 6 条</h2>
+      <div id="feed"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>等你决定 · 2</h2>
+      <div class="hint">不可逆动作永远停在这里，无视置信度。</div>
+      <div id="gates"></div>
+    </div>
+
+    <div class="panel" style="margin-top:18px">
+      <h2>产物</h2>
+      <div id="artifacts"></div>
+    </div>
+  </div>
+</div>
+
+<div class="foot">
+  预览数据为模拟运行，经真实 router / summarize 产出；接入面板后数字来自 <code>deliveries.json</code> + <code>events.jsonl</code> 投影。
+</div>
+
+<script>
+const LANES = { code: 'var(--code)', frontier: 'var(--frontier)', human: 'var(--human)' };
+
+const stages = [
+  { key: 'brief',  name: '需求解析', status: 'done', conf: 0.90, time: '0.3s', art: '4 类使用者',      split: { code: 100, frontier: 0, human: 0 } },
+  { key: 'roles',  name: '角色权限', status: 'done', conf: 0.86, time: '12s',  art: '4 角色 / 12 权限', split: { code: 100, frontier: 0, human: 0 } },
+  { key: 'design', name: '数据与 API', status: 'done', conf: 0.84, time: '18s', art: '19 个工作项',      split: { code: 40, frontier: 40, human: 20 } },
+  { key: 'build',  name: '实现',     status: 'active', conf: 0.62, time: '1m14s', art: '6 / 19 完成',    split: { code: 62, frontier: 29, human: 9 } },
+  { key: 'verify', name: '测试验证', status: 'todo', conf: null, time: '—',   art: '待跑',             split: null },
+  { key: 'report', name: '交付报告', status: 'todo', conf: null, time: '—',   art: '待生成',           split: null },
+];
+
+const decisions = [
+  { name: '改哪个文件',   value: 'src/quotes/pricing.ts', rule: 'file:single-hit', conf: 0.94, lane: 'code' },
+  { name: '用哪个工具',   value: 'grep → edit → npm test', rule: 'route:table-hit', conf: 0.87, lane: 'code' },
+  { name: '重试还是停',   value: '重试（同类错误 1 次）',   rule: 'retry:same-class', conf: 0.72, lane: 'frontier' },
+  { name: '真的干完了吗', value: 'no（测试未跑）',         rule: 'tests:not-run',   conf: 0.19, lane: 'human' },
+  { name: '这版留不留',   value: 'drop（+312/−8）',        rule: 'diff:scale',      conf: 0.58, lane: 'frontier' },
+  { name: '改动风险多大', value: '2.4 / 10',               rule: 'diff:static',     conf: 0.76, lane: 'frontier' },
+  { name: '用哪个模型',   value: 'deepseek-chat',          rule: 'route:default',   conf: 0.74, lane: 'frontier' },
+  { name: '调哪个技能',   value: 'workbench_plan_software', rule: 'route:single-candidate', conf: 0.90, lane: 'code' },
+  { name: '输入是否夹带', value: 'no',                     rule: 'scan:clean',      conf: 0.97, lane: 'code' },
+  { name: '要不要问人',   value: 'yes（要合并 PR）',       rule: 'review:open-question', conf: 0.46, lane: 'human' },
+];
+
+const gates = [
+  { task: '合并 PR #418', why: 'irreversible · merge_pull_request', at: '20:12' },
+  { task: '删除旧分支 quote-v1', why: 'irreversible · delete_branch', at: '20:09' },
+];
+
+const feed = [
+  { ts: '20:14', lane: 'human', text: '要不要问人 · yes', note: '0.46 → 停给你' },
+  { ts: '20:13', lane: 'frontier', text: '改动风险多大 · 2.4/10', note: '0.76 → 模型仲裁' },
+  { ts: '20:13', lane: 'code', text: '用哪个工具 · grep → edit', note: '0.87 → 精确规则' },
+  { ts: '20:12', lane: 'code', text: '改哪个文件 · src/quotes/pricing.ts', note: '0.94 → 精确规则' },
+  { ts: '20:12', lane: 'frontier', text: '重试还是停 · 重试', note: '0.72 → 模型仲裁' },
+  { ts: '20:11', lane: 'human', text: '真的干完了吗 · no', note: '0.19 → 停给你' },
+];
+
+const artifacts = [
+  ['roles.json', '4 角色 / 12 权限'],
+  ['design.json', '19 工作项 / 8 API'],
+  ['review.json', '待测试后生成'],
+];
+
+document.getElementById('rail').innerHTML = stages.map((s, i) => {
+  const dot = s.status === 'done' ? 'ok' : s.status === 'active' ? 'run' : '';
+  const bar = s.split
+    ? `<div class="bar">${['code','frontier','human'].map(l => s.split[l] ? `<span style="width:${s.split[l]}%;background:${LANES[l]}"></span>` : '').join('')}</div>`
+    : '<div class="bar"></div>';
+  return `<div class="stage ${s.status}">
+    <div class="card">
+      <div class="top"><span class="dot ${dot}"></span><span class="name">${s.name}</span><span class="idx">0${i + 1}</span></div>
+      <div class="meta"><span>${s.conf === null ? '—' : s.conf.toFixed(2)}</span><span>${s.time}</span></div>
+      <div class="art">${s.art}</div>
+      ${bar}
+    </div>
+    ${i < stages.length - 1 ? '<span class="arrow">›</span>' : ''}
+  </div>`;
+}).join('');
+
+document.getElementById('decisions').innerHTML = decisions.map(d => `
+  <div class="drow">
+    <span class="dname">${d.name}</span>
+    <span class="dval">${d.value} <span class="drule">· ${d.rule}</span></span>
+    <span class="conf"><span class="track"><span class="fill" style="width:${d.conf * 100}%;background:${LANES[d.lane]}"></span></span><span class="num">${d.conf.toFixed(2)}</span></span>
+    <span class="lane ${d.lane}">${d.lane}</span>
+    <span></span>
+  </div>`).join('');
+
+document.getElementById('gates').innerHTML = gates.map(g => `
+  <div class="gate">
+    <div class="t">${g.task}</div>
+    <div class="why">${g.why} · ${g.at}</div>
+    <div class="acts"><button class="btn primary" disabled>批准</button><button class="btn" disabled>打回</button></div>
+  </div>`).join('') + '<div class="hint" style="margin-top:10px">P1 接上审批动作后按钮才可点。</div>';
+
+document.getElementById('feed').innerHTML = feed.map(f => `
+  <div class="frow"><span class="ts">${f.ts}</span><span class="dot" style="background:${LANES[f.lane]}"></span>
+  <span class="what">${f.text} <em>${f.note}</em></span></div>`).join('');
+
+document.getElementById('artifacts').innerHTML = artifacts.map(([n, d]) => `
+  <div class="frow" style="grid-template-columns:1fr"><span class="what">${n} <em>${d}</em></span></div>`).join('');
+</script>
+</body>
+</html>
