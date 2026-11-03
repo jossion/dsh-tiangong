@@ -173,12 +173,16 @@ findskill { query, taskId? }
 | **B** ✅ | `planner.js` + `workbench_submit_plan` 工具 + `plan` 投影 | 非法计划被拒、合法计划成树、一 job 一计划 |
 | **C** ✅ | `requirements.js` + `POST /workbench/requirements`（文本/md/txt 上传）+ 规划指令 | 需求落账、可读文件、指令含 jobId 与技能提示 |
 | **F** ✅ | `skillfind.js` + `workbench_find_skill`（会话目录 + 插件市场 + 审计行） | 无宿主服务时干净降级；命中带理由 |
-| D | `sessions.js`：建会话、绑定、prompt section、wake | 新项目自动有专属会话，能收到规划指令 |
-| E | `dispatch.js`：事件驱动循环 + 冷却 + 预算 + autopilot | 无人工点击推进到 done |
+| **D** ✅ | `sessions.js`：项目专属会话 + 工作区、agent 创建/恢复、`followup` 唤醒、消息形状对齐宿主的 `user/message` | 无宿主服务时干净降级并落 human 卡点 |
+| **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
 | G | 面板：创建应用、需求上传、自动运行状态、卡点 | 截图复验（先过 UI 技能） |
 | H | 审计遗留 P1：connection fence / 路径沙箱 / store 损坏保护 | 测试 + 手工验证 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）
+
+> **D/E 已落地但尚未真机验证**：`agent.followup`、`sessions.create`、`agents.create`
+> 在插件上下文里的确切行为只用假 ctx 单测过；真正跑通需要重启 DSH（宿主模块不热更）。
+> 重启后先看 `~/.dsh/workbench/events.jsonl` 里有没有 `kind:"dispatch"` 与 `kind:"delivery"`。
 
 1. **唤醒契约**：`agent.followup()` / `agent.inject()` 在插件侧的确切签名与状态含义（idle/running）。
 2. **建 agent**：`agents.create({ sessionId, meta: { cwd, agentPreset } })` 需要先 `sessions.create`；

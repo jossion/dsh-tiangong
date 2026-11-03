@@ -32,6 +32,8 @@ import { readyWork, reportEvents } from './executor.js'
 import { PlanError, assertPlan, buildCardId, planEvents } from './planner.js'
 import { RequirementError, assertRequirement, storeRequirement } from './requirements.js'
 import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills } from './skillfind.js'
+import { createSessionBridge } from './sessions.js'
+import { createDispatcher } from './dispatch.js'
 import { readFinanceLedger } from './ledgerdb.js'
 import {
   DEFAULT_FINANCE_DIR,
@@ -171,6 +173,10 @@ export function apply(ctx, row) {
 
   const store = createStore(config.dataDir)
   const events = createEventLog(join(config.dataDir, 'events.jsonl'))
+  // The delivery loop's two halves: the host bridge (sessions/agents) and the
+  // dispatcher that wakes the bound agent when work is ready.
+  const sessionBridge = createSessionBridge({ ctx, config, events })
+  let loop = null
 
   // A decision sink that never lets an audit failure abort a run: losing one
   // log line is bad, losing the delivery is worse.
@@ -1312,6 +1318,9 @@ export function apply(ctx, row) {
         file: stored.relative,
         ts: now,
       }))
+      // The loop plans when a delivery session is bound; a tick here saves the
+      // user up to one timer interval.
+      loop?.schedule?.()
       sendJson(response, 202, {
         status: 'accepted',
         projectId: project.id,
@@ -1421,6 +1430,15 @@ export function apply(ctx, row) {
       }
     }, 'workbench: state route')
   })
+
+  // The loop is event-driven: tool results, subagent endings and agent status
+  // changes schedule a tick; a slow timer is only the safety net.
+  loop = createDispatcher({ ctx, config, events, sessions: sessionBridge })
+  // Attach only where the host exposes event subscriptions: a headless or test
+  // context keeps the tools and routes, and simply never auto-drives.
+  if (typeof ctx.on === 'function') {
+    ctx.effect(() => loop.attach())
+  }
 
   // One tool so the agent can drive delivery from an ordinary conversation,
   // which is how a non-technical owner will actually reach it.
@@ -1565,6 +1583,7 @@ export function apply(ctx, row) {
         for (const line of planEvents(plan, { now })) await events.append(line)
         const container = buildCardId(jobId)
         for (const path of files) await events.append(artifactEvent({ taskId: container, path }))
+        loop?.schedule?.()
         return JSON.stringify({
           jobId,
           projectId: project.id,
@@ -1871,6 +1890,7 @@ export function apply(ctx, row) {
           },
         })
         for (const line of lines) await events.append(line)
+        loop?.schedule?.()
 
         const after = buildBoard(await events.all())
         const remaining = readyWork(after, { projectId: project.id, limit: 99 }).work.length

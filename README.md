@@ -21,8 +21,10 @@ packages/workbench/          @jos/workbench 插件本体
 ├── planner.js               计划协议：DAG 校验 + 任务树写入
 ├── requirements.js          需求入口：文本/文档解析 + 规划指令
 ├── skillfind.js             技能发现：会话目录 + 插件市场打分
+├── sessions.js              交付会话：建工作区/会话/agent、followup 唤醒
+├── dispatch.js              调度循环：事件驱动 tick、冷却、预算、交付去重
 ├── store.js                 本地 JSON 持久化（staff / ledger / deliveries）
-├── tests/                   node --test，219 个用例
+├── tests/                   node --test，231 个用例
 ├── preview/                 静态面板预览 + seed 脚本
 └── locale/                  插件卡片显示文案
 docs/
@@ -34,7 +36,7 @@ _dsh_ref/                    插件开发参考（host-plugin / ui-plugin / prac
 
 ```bash
 cd packages/workbench
-npm test              # 219 个测试
+npm test              # 231 个测试
 npm run preview       # 生成 preview/out/data.js，然后打开 preview/dashboard.html
 node --check client.js
 ```

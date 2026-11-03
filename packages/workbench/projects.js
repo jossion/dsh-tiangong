@@ -319,6 +319,8 @@ export function foldTasks(events) {
           brief: null,
           artifactDir: null,
           workspace: null,
+          workspaceId: null,
+          sessionId: null,
           status: 'created',
           createdAt: null,
           updatedAt: null,
@@ -329,6 +331,10 @@ export function foldTasks(events) {
       if (typeof event.brief === 'string' && event.brief !== '') project.brief = event.brief
       if (typeof event.artifactDir === 'string' && event.artifactDir !== '') project.artifactDir = event.artifactDir
       if (typeof event.workspace === 'string' && event.workspace !== '') project.workspace = event.workspace
+      if (typeof event.workspaceId === 'string' && event.workspaceId !== '') project.workspaceId = event.workspaceId
+      if (event.workspaceId === null) project.workspaceId = null
+      if (typeof event.sessionId === 'string' && event.sessionId !== '') project.sessionId = event.sessionId
+      if (event.sessionId === null) project.sessionId = null
       if (event.event === 'preview-stopped') project.previewUrl = null
       else if (typeof event.previewUrl === 'string' && event.previewUrl !== '') project.previewUrl = event.previewUrl
       if (['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled'].includes(event.event)) {
@@ -608,6 +614,8 @@ export function buildBoard(events, options = {}) {
         brief: meta?.brief ?? null,
         artifactDir: meta?.artifactDir ?? null,
         workspace: meta?.workspace ?? null,
+        workspaceId: meta?.workspaceId ?? null,
+        sessionId: meta?.sessionId ?? null,
         status: meta?.status ?? 'created',
         previewUrl: meta?.previewUrl ?? null,
         createdAt: meta?.createdAt ?? null,
