@@ -61,7 +61,7 @@ export function jobEvent(input = {}) {
   const event = input.event ?? 'created'
   if (typeof projectId !== 'string' || projectId === '') throw new Error('a job event needs a projectId')
   if (typeof jobId !== 'string' || jobId === '') throw new Error('a job event needs a jobId')
-  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'config', 'preview-stopped'].includes(event)) {
+  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'deleted', 'config', 'preview-stopped'].includes(event)) {
     throw new Error(`unknown job event: ${event}`)
   }
   return { ...input, kind: 'job', event }
@@ -95,7 +95,7 @@ export function projectEvent(input = {}) {
   const { projectId } = input
   const event = input.event ?? 'created'
   if (typeof projectId !== 'string' || projectId === '') throw new Error('a project event needs a projectId')
-  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'config', 'preview-stopped'].includes(event)) {
+  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'deleted', 'config', 'preview-stopped'].includes(event)) {
     throw new Error(`unknown project event: ${event}`)
   }
   return { ...input, kind: 'project', event }
@@ -197,6 +197,9 @@ export function foldTasks(events) {
   const approvals = []
   const projects = new Map()
   const jobs = new Map()
+  // Projects a person deleted from the board. The ledger keeps their history,
+  // but every projection stops showing them from the deletion event onwards.
+  const deletedProjects = new Set()
   const list = Array.isArray(events) ? events : []
 
   for (const event of list) {
@@ -352,6 +355,11 @@ export function foldTasks(events) {
 
     if (kind === 'project') {
       if (typeof event.projectId !== 'string' || event.projectId === '') continue
+      if (event.event === 'deleted') {
+        deletedProjects.add(event.projectId)
+        projects.delete(event.projectId)
+        continue
+      }
       let project = projects.get(event.projectId)
       if (project === undefined) {
         project = {
@@ -495,7 +503,7 @@ export function foldTasks(events) {
     return node.parentId === null || !tasks.has(node.parentId)
   }).sort(byCreated)
 
-  return { tasks, approvals, roots, projects, jobs }
+  return { tasks, approvals, roots, projects, jobs, deletedProjects }
 }
 
 /** Injects defaults down the tree so a subtask inherits its parent's identity. */
@@ -550,7 +558,8 @@ function addCounts(target, node) {
  * and counting both would double the denominator and understate the project.
  */
 export function buildBoard(events, options = {}) {
-  const { tasks, roots, projects: metas, jobs: jobMetas } = foldTasks(events)
+  const { tasks, roots, projects: metas, jobs: jobMetas, deletedProjects = new Set() } = foldTasks(events)
+  const hiddenProject = id => deletedProjects.has(id)
   propagate(roots)
 
   /** Aggregate any set of task nodes into the shape one screen renders. */
@@ -669,11 +678,13 @@ export function buildBoard(events, options = {}) {
     return project
   }
 
-  // Meta-only projects still appear (a card opened before any work).
-  for (const id of metas.keys()) projectOf(id)
+  // Meta-only projects still appear (a card opened before any work) — unless
+  // a person deleted the project from the board.
+  for (const id of metas.keys()) if (!hiddenProject(id)) projectOf(id)
 
   const nodesByProject = new Map()
   for (const node of tasks.values()) {
+    if (hiddenProject(node.projectId)) continue
     const list = nodesByProject.get(node.projectId) ?? []
     list.push(node)
     nodesByProject.set(node.projectId, list)
@@ -685,7 +696,8 @@ export function buildBoard(events, options = {}) {
     const jobIds = new Set()
     for (const node of nodes) jobIds.add(node.jobId ?? projectId)
     for (const jobId of jobMetas.keys()) {
-      if (jobMetas.get(jobId)?.projectId === projectId) jobIds.add(jobId)
+      const meta = jobMetas.get(jobId)
+      if (meta?.projectId === projectId && !hiddenProject(projectId)) jobIds.add(jobId)
     }
     if (jobIds.size === 0) return []
     const jobs = []

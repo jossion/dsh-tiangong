@@ -954,3 +954,50 @@ test('a done report accepts passed/failed aliases as real test evidence', async 
     assert.equal(job.progress.done, 1)
   })
 })
+
+function deleteRequest(body) {
+  return {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(JSON.stringify(body))
+    },
+  }
+}
+
+test('a project card can be deleted without erasing its history', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+    const stateRoute = routes.find(route => route.path === STATE_PATH)
+
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '公司管理' }), created)
+    const { projectId } = JSON.parse(created.body)
+
+    const deleted = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId }), deleted)
+    assert.equal(deleted.status, 200)
+    assert.deepEqual(JSON.parse(deleted.body), { deleted: true, projectId })
+
+    const state = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, state)
+    assert.equal(JSON.parse(state.body).board.projects.length, 0, 'the card leaves the board')
+
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    const lines = await log.all()
+    const tombstone = lines.find(line => line.kind === 'project' && line.event === 'deleted')
+    assert.ok(tombstone, 'the deletion is an append-only ledger line')
+    assert.equal(tombstone.projectId, projectId)
+
+    const again = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId }), again)
+    assert.equal(again.status, 404, 'deleting twice reports the card is already gone')
+
+    const missing = fakeResponse()
+    await projectsRoute.handler(deleteRequest({}), missing)
+    assert.equal(missing.status, 400)
+    assert.equal(JSON.parse(missing.body).error.code, 'bad-request')
+  })
+})

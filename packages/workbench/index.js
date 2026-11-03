@@ -359,12 +359,35 @@ export function apply(ctx, row) {
     kind: 'exact',
     path: PROJECTS_PATH,
     handler: async (request, response) => {
-      if (request.method !== 'POST') {
-        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-        return
-      }
       if (!isSameOrigin(request)) {
         sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
+        return
+      }
+      // Delete appends a `deleted` event; the ledger stays append-only and the
+      // board projection simply stops showing that project from then on.
+      if (request.method === 'DELETE') {
+        let projectId = ''
+        try {
+          projectId = String((await readJsonBody(request))?.projectId ?? '').trim()
+        } catch (error) {
+          sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
+          return
+        }
+        if (projectId === '') {
+          sendJson(response, 400, { error: { code: 'bad-request', message: 'projectId is required' } })
+          return
+        }
+        const board = buildBoard(await events.all())
+        if (!board.projects.some(item => item.id === projectId)) {
+          sendJson(response, 404, { error: { code: 'not-found', message: 'no such project' } })
+          return
+        }
+        await events.append(projectEvent({ projectId, event: 'deleted', ts: new Date().toISOString() }))
+        sendJson(response, 200, { deleted: true, projectId })
+        return
+      }
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
         return
       }
       let name = ''

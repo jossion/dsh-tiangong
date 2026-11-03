@@ -318,3 +318,19 @@ test('a job reads as done once every leaf card is done', () => {
   ]).projects[0]
   assert.equal(cancelled.status, 'cancelled', 'a cancelled project stays cancelled')
 })
+
+test('a deleted project card disappears from the board but keeps its history', () => {
+  const events = [
+    projectEvent({ projectId: 'p1', title: '公司管理', ts: ts(0) }),
+    jobEvent({ projectId: 'p1', jobId: 'j1', title: '员工管理', ts: ts(1) }),
+    taskEvent({ event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1', stage: 'build', title: 'A', ts: ts(2) }),
+    projectEvent({ projectId: 'p1', event: 'deleted', ts: ts(3) }),
+  ]
+  const board = buildBoard(events)
+  assert.equal(board.projects.length, 0, 'the deleted card is gone from the board')
+  assert.equal(board.totals.tasks, 0, 'and it stops contributing totals')
+
+  const folded = foldTasks(events)
+  assert.ok(folded.deletedProjects.has('p1'), 'the deletion is part of the folded history')
+  assert.ok(folded.projects.has('p1') === false, 'but the project meta is not resurrected')
+})

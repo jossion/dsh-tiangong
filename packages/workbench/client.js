@@ -111,6 +111,10 @@ window.__ModuleLoader__.load({
         overviewDone: 'Every task is done. Open development only if you want to change something.',
         backToOverview: '← Overview',
         createCard: 'Create',
+        deleteCard: 'Delete project',
+        deleteCardTitle: 'Delete this project card?',
+        deleteCardBody: 'The card disappears from Tiangong. Files in its workspace (databases, deliveries) are not deleted.',
+        deleteCardConfirm: 'Delete card',
         createDialogTitle: 'Create an app',
         createNamePlaceholder: 'e.g. Company operations',
         createHint: 'The app gets its own workspace and a dedicated delivery session. Submit a requirement and the automatic loop takes over.',
@@ -358,6 +362,10 @@ window.__ModuleLoader__.load({
         overviewDone: '所有任务都完成了。要改动时再进开发。',
         backToOverview: '← 概览',
         createCard: '创建',
+        deleteCard: '删除项目',
+        deleteCardTitle: '删除这个项目卡？',
+        deleteCardBody: '卡片会从天工里移除；项目工作区里的文件（数据库、交付物）不会删除。',
+        deleteCardConfirm: '删除卡片',
         createDialogTitle: '创建应用',
         createNamePlaceholder: '例如：公司管理',
         createHint: '创建后自动分配工作区和专属交付会话；提交需求就进入自动闭环。',
@@ -2937,6 +2945,9 @@ window.__ModuleLoader__.load({
       const [cardName, setCardName] = useState('')
       const [createError, setCreateError] = useState(null)
       const [creating, setCreating] = useState(false)
+      const [deleteTarget, setDeleteTarget] = useState(null)
+      const [deleteBusy, setDeleteBusy] = useState(false)
+      const [deleteError, setDeleteError] = useState(null)
       const [jobDialogOpen, setJobDialogOpen] = useState(false)
       const [jobBrief, setJobBrief] = useState('')
       const [jobBusy, setJobBusy] = useState(false)
@@ -3027,6 +3038,34 @@ window.__ModuleLoader__.load({
           setCreating(false)
         }
       }, [cardName, reload, t])
+
+      const removeCard = useCallback(async () => {
+        if (deleteTarget === null) return
+        setDeleteError(null)
+        setDeleteBusy(true)
+        try {
+          const response = await fetch('/workbench/projects', {
+            method: 'DELETE',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ projectId: deleteTarget.id }),
+          })
+          const body = await response.json().catch(() => null)
+          if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          if (selected === deleteTarget.id) {
+            setSelected(null)
+            setTasksOpen(false)
+            setShowHome(false)
+            setJobId(null)
+          }
+          setDeleteTarget(null)
+          reload()
+        } catch (error) {
+          setDeleteError(String(error?.message ?? error))
+        } finally {
+          setDeleteBusy(false)
+        }
+      }, [deleteTarget, reload, selected])
 
       const pickJobFile = useCallback(file => {
         setJobError(null)
@@ -3195,12 +3234,44 @@ window.__ModuleLoader__.load({
               fontSize: '14px',
             },
           }, `＋ ${t('createCard')}`),
-          projects.map(item => h(ProjectCard, {
+          projects.map(item => h('div', {
             key: item.id,
-            t,
-            project: item,
-            onOpen: () => { setSelected(item.id); setTasksOpen(false); setShowHome(false); setJobId(null) },
-          }))),
+            style: { position: 'relative', display: 'flex', minWidth: 0 },
+          },
+            h(ProjectCard, {
+              t,
+              project: item,
+              onOpen: () => { setSelected(item.id); setTasksOpen(false); setShowHome(false); setJobId(null) },
+            }),
+            h('button', {
+              type: 'button',
+              className: 'wb-btn',
+              title: t('deleteCard'),
+              'aria-label': `${t('deleteCard')}: ${item.title || item.id}`,
+              onClick: event => {
+                event.stopPropagation()
+                setDeleteError(null)
+                setDeleteTarget(item)
+              },
+              style: {
+                position: 'absolute',
+                top: '6px',
+                right: '6px',
+                width: '22px',
+                height: '22px',
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '6px',
+                border: '1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.12))',
+                background: 'transparent',
+                color: 'var(--dsw-alias-label-secondary)',
+                cursor: 'pointer',
+                fontSize: '14px',
+                lineHeight: 1,
+              },
+            }, '×')))),
         dialogOpen
           ? h(CreateCardDialog, {
               t,
@@ -3212,6 +3283,18 @@ window.__ModuleLoader__.load({
               onConfirm: createCard,
             })
           : null,
+        deleteTarget === null
+          ? null
+          : h(Dialog, {
+              title: t('deleteCardTitle'),
+              error: deleteError,
+              busy: deleteBusy,
+              confirmLabel: t('deleteCardConfirm'),
+              cancelLabel: t('cancel'),
+              onCancel: () => { setDeleteTarget(null); setDeleteError(null) },
+              onConfirm: removeCard,
+            },
+              h('p', { style: { ...s.muted, margin: 0 } }, t('deleteCardBody'))),
       )
     }
 
