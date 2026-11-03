@@ -112,9 +112,11 @@ window.__ModuleLoader__.load({
         backToOverview: '← Overview',
         createCard: 'Create',
         deleteCard: 'Delete project',
-        deleteCardTitle: 'Delete this project card?',
-        deleteCardBody: 'The card disappears from Tiangong. Files in its workspace (databases, deliveries) are not deleted.',
+        deleteCardTitle: 'Delete “{name}”?',
+        deleteCardBody: 'The card disappears from Tiangong; files on disk are not deleted.',
         deleteCardConfirm: 'Delete card',
+        deleteCardWorkspace: 'Workspace: {workspace}',
+        deleteCardNoWorkspace: 'Workspace: not set (no app files to keep)',
         createDialogTitle: 'Create an app',
         createNamePlaceholder: 'e.g. Company operations',
         createHint: 'The app gets its own workspace and a dedicated delivery session. Submit a requirement and the automatic loop takes over.',
@@ -363,9 +365,11 @@ window.__ModuleLoader__.load({
         backToOverview: '← 概览',
         createCard: '创建',
         deleteCard: '删除项目',
-        deleteCardTitle: '删除这个项目卡？',
-        deleteCardBody: '卡片会从天工里移除；项目工作区里的文件（数据库、交付物）不会删除。',
+        deleteCardTitle: '删除项目卡「{name}」？',
+        deleteCardBody: '卡片会从天工看板移除；项目在磁盘上的文件不会被删除。',
         deleteCardConfirm: '删除卡片',
+        deleteCardWorkspace: '工作区：{workspace}',
+        deleteCardNoWorkspace: '工作区：未设置（没有应用文件）',
         createDialogTitle: '创建应用',
         createNamePlaceholder: '例如：公司管理',
         createHint: '创建后自动分配工作区和专属交付会话；提交需求就进入自动闭环。',
@@ -2730,15 +2734,20 @@ window.__ModuleLoader__.load({
     }
 
     function ProjectCard(props) {
-      const { t, project, onOpen } = props
+      const { t, project, onOpen, onDelete } = props
       // A card is an app launcher, not a task dashboard: no counts, no meter.
       const ready = Boolean(project.workspace)
-      return h('button', {
+      return h('div', {
+        style: { position: 'relative', display: 'flex', minWidth: 0, flex: '1 1 auto' },
+      },
+        h('button', {
         type: 'button',
         className: 'wb-card wb-btn',
         onClick: onOpen,
         style: {
           ...s.card,
+          flex: '1 1 auto',
+          paddingRight: '34px',
           textAlign: 'left',
           cursor: 'pointer',
           gap: '8px',
@@ -2758,7 +2767,38 @@ window.__ModuleLoader__.load({
           h('span', { style: { ...s.stageName, fontSize: '15px' } }, project.title || project.id)),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
           h('span', { style: { ...s.stageMeta } }, ready ? t('cardEnterApp') : t('cardNoApp')),
-          h('span', { style: { ...s.stageMeta, marginLeft: 'auto' } }, '→')))
+          h('span', { style: { ...s.stageMeta, marginLeft: 'auto' } }, '→'))),
+        typeof onDelete === 'function'
+          ? h('button', {
+              type: 'button',
+              className: 'wb-btn',
+              title: t('deleteCard'),
+              'aria-label': `${t('deleteCard')}: ${project.title || project.id}`,
+              onClick: event => {
+                event.stopPropagation()
+                onDelete()
+              },
+              style: {
+                position: 'absolute',
+                top: '6px',
+                right: '6px',
+                width: '22px',
+                height: '22px',
+                padding: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '6px',
+                border: '1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.12))',
+                background: 'var(--dsw-alias-bg-l1, rgba(0,0,0,.25))',
+                color: 'var(--dsw-alias-label-secondary)',
+                cursor: 'pointer',
+                fontSize: '14px',
+                lineHeight: 1,
+                zIndex: 1,
+              },
+            }, '×')
+          : null)
     }
 
     function Dialog(props) {
@@ -3234,44 +3274,13 @@ window.__ModuleLoader__.load({
               fontSize: '14px',
             },
           }, `＋ ${t('createCard')}`),
-          projects.map(item => h('div', {
+          projects.map(item => h(ProjectCard, {
             key: item.id,
-            style: { position: 'relative', display: 'flex', minWidth: 0 },
-          },
-            h(ProjectCard, {
-              t,
-              project: item,
-              onOpen: () => { setSelected(item.id); setTasksOpen(false); setShowHome(false); setJobId(null) },
-            }),
-            h('button', {
-              type: 'button',
-              className: 'wb-btn',
-              title: t('deleteCard'),
-              'aria-label': `${t('deleteCard')}: ${item.title || item.id}`,
-              onClick: event => {
-                event.stopPropagation()
-                setDeleteError(null)
-                setDeleteTarget(item)
-              },
-              style: {
-                position: 'absolute',
-                top: '6px',
-                right: '6px',
-                width: '22px',
-                height: '22px',
-                padding: 0,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: '6px',
-                border: '1px solid var(--dsw-alias-border-l1, rgba(255,255,255,.12))',
-                background: 'transparent',
-                color: 'var(--dsw-alias-label-secondary)',
-                cursor: 'pointer',
-                fontSize: '14px',
-                lineHeight: 1,
-              },
-            }, '×')))),
+            t,
+            project: item,
+            onOpen: () => { setSelected(item.id); setTasksOpen(false); setShowHome(false); setJobId(null) },
+            onDelete: () => { setDeleteError(null); setDeleteTarget(item) },
+          }))),
         dialogOpen
           ? h(CreateCardDialog, {
               t,
@@ -3286,7 +3295,7 @@ window.__ModuleLoader__.load({
         deleteTarget === null
           ? null
           : h(Dialog, {
-              title: t('deleteCardTitle'),
+              title: t('deleteCardTitle').replace('{name}', deleteTarget.title || deleteTarget.id),
               error: deleteError,
               busy: deleteBusy,
               confirmLabel: t('deleteCardConfirm'),
@@ -3294,7 +3303,10 @@ window.__ModuleLoader__.load({
               onCancel: () => { setDeleteTarget(null); setDeleteError(null) },
               onConfirm: removeCard,
             },
-              h('p', { style: { ...s.muted, margin: 0 } }, t('deleteCardBody'))),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+                h('p', { style: { ...s.muted, margin: 0 } }, t('deleteCardBody')),
+                h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
+                  t('deleteCardWorkspace').replace('{workspace}', deleteTarget.workspace || t('deleteCardNoWorkspace'))))),
       )
     }
 

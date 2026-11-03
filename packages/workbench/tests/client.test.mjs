@@ -617,7 +617,12 @@ test('a project card is an app launcher, never a task dashboard', () => {
   assert.ok(strings.includes('cardEnterApp'), 'the card says it opens the app')
   assert.ok(!strings.some(text => /\d+\/\d+/.test(text)), 'no task counts on an app entry')
   assert.ok(!strings.includes('boardProgress'), 'no progress label')
-  page.props.onClick()
+  let openButton = null
+  walk(page, node => {
+    if (node.type === 'button' && String(node.props?.className ?? '').includes('wb-card')) openButton = node
+  })
+  assert.ok(openButton, 'the card itself is still a button')
+  openButton.props.onClick()
   assert.deepEqual(opened, ['open'])
 
   const notReady = ProjectCard({ t, project: { ...project, workspace: null }, onOpen: () => {} })
@@ -627,6 +632,26 @@ test('a project card is an app launcher, never a task dashboard', () => {
     if (typeof props.children === 'string') labels.push(props.children)
   })
   assert.ok(labels.includes('cardNoApp'), 'a project without an app says so')
+})
+
+test('a project card carries its delete control in the corner', () => {
+  const deleted = []
+  const page = ProjectCard({
+    t,
+    project: { ...project, workspace: '/tmp/app' },
+    onOpen: () => {},
+    onDelete: () => deleted.push('x'),
+  })
+  let control = null
+  walk(page, node => {
+    const props = node.props || {}
+    if (node.type === 'button' && typeof props['aria-label'] === 'string' && props['aria-label'].startsWith('deleteCard')) control = node
+  })
+  assert.ok(control, 'the delete control exists on the card')
+  let stopped = false
+  control.props.onClick({ stopPropagation: () => { stopped = true } })
+  assert.equal(stopped, true, 'clicking delete must not open the project')
+  assert.deepEqual(deleted, ['x'])
 })
 
 test('the plugin only requires the services it cannot run without', () => {
