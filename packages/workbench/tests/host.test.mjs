@@ -633,9 +633,9 @@ test('the panel can see a project\'s dependencies and is refused a phantom start
     await servicesRoute.handler({ method: 'GET', url: '/workbench/services?projectId=p1' }, listed)
     assert.equal(listed.status, 200)
     const services = JSON.parse(listed.body).data
-    assert.deepEqual(services.map(service => service.id), ['db', 'web'])
+    // No delivered app under this workspace: the database row is all there is.
+    assert.deepEqual(services.map(service => service.id), ['db'])
     assert.equal(services[0].status, 'missing', 'no database file yet')
-    assert.ok(['running', 'stopped'].includes(services[1].status), 'web status reflects whatever is on the port')
 
     const bad = fakeResponse()
     await servicesRoute.handler(postRequest({ projectId: 'p1', serviceId: 'db', action: 'start' }), bad)
@@ -645,6 +645,13 @@ test('the panel can see a project\'s dependencies and is refused a phantom start
     await servicesRoute.handler(postRequest({ projectId: 'p1', serviceId: 'web', action: 'start' }), noApp)
     assert.equal(noApp.status, 400)
     assert.equal(JSON.parse(noApp.body).error.code, 'NO_APP')
+
+    // A project that still ships an app lists the server row again.
+    mkdirSync(join(workspace, 'web'), { recursive: true })
+    await writeFile(join(workspace, 'web', 'package.json'), '{"scripts":{"start":"next start"}}')
+    const withApp = fakeResponse()
+    await servicesRoute.handler({ method: 'GET', url: '/workbench/services?projectId=p1' }, withApp)
+    assert.deepEqual(JSON.parse(withApp.body).data.map(service => service.id), ['db', 'web'])
   })
 })
 

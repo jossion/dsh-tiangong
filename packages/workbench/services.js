@@ -45,7 +45,7 @@ export async function listServices(workspace) {
   const url = `http://127.0.0.1:${port}`
   const running = managed.get(workspace)
   const reachable = await probe(url)
-  return [
+  const rows = [
     {
       id: 'db',
       label: '数据库',
@@ -54,7 +54,12 @@ export async function listServices(workspace) {
       detail: dbFile(workspace),
       controls: false,
     },
-    {
+  ]
+  // The app server is only listed when there is an app to serve: a project whose
+  // delivered code was removed keeps its database but has nothing to start.
+  const dir = appDir(workspace)
+  if (existsSync(join(dir, 'package.json'))) {
+    rows.push({
       id: 'web',
       label: '应用服务',
       kind: 'server',
@@ -63,8 +68,9 @@ export async function listServices(workspace) {
       port,
       controls: true,
       managed: running !== undefined,
-    },
-  ]
+    })
+  }
+  return rows
 }
 
 /** Start the app server if it is not already answering. Idempotent. */
