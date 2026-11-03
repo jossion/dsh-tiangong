@@ -95,8 +95,9 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
     wakeCooldownMs: Number(config.wakeCooldownMs) > 0 ? Number(config.wakeCooldownMs) : DEFAULT_LOOP.wakeCooldownMs,
     planTimeoutMs: Number(config.planTimeoutMs) > 0 ? Number(config.planTimeoutMs) : DEFAULT_LOOP.planTimeoutMs,
     maxRounds: Number(config.maxRounds) > 0 ? Number(config.maxRounds) : DEFAULT_LOOP.maxRounds,
-    budgetUsd: Number.isFinite(Number(config.budgetUsd)) && config.budgetUsd !== null ? Number(config.budgetUsd) : null,
-    budgetTokens: Number.isFinite(Number(config.budgetTokens)) && config.budgetTokens !== null ? Number(config.budgetTokens) : null,
+    // Config defaults are 0 = "no budget"; the orchestrator expects null for disabled.
+    budgetUsd: Number(config.budgetUsd) > 0 ? Number(config.budgetUsd) : null,
+    budgetTokens: Number(config.budgetTokens) > 0 ? Number(config.budgetTokens) : null,
   })
 
   function serviceOptional(name) {

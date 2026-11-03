@@ -13,7 +13,9 @@
   "files": [
     "locale/*.json",
     "*.js",
-    "icon.svg"
+    "icon.svg",
+    "README.md",
+    "LICENSE"
   ],
   "icon": "./icon.svg",
   "scripts": {

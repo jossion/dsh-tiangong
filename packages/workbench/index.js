@@ -49,6 +49,95 @@ import {
 
 export const inject = ['llm', 'tools']
 
+/**
+ * The plugin's tunables, in the official form: `export const Config` makes the
+ * Loader validate the row's `config` and fill defaults at activation.
+ *
+ * Schemastery is resolved from the host installation at load time. Tests (and
+ * any embedder without the host package) fall back to the same contract as a
+ * Standard Schema, so validation stays honest instead of disappearing.
+ */
+const CONFIG_DEFAULTS = Object.freeze({
+  dataDir: '',
+  appsRoot: '',
+  agentPreset: '',
+  provider: '',
+  model: '',
+  autoRun: true,
+  wakeCooldownMs: 4000,
+  planTimeoutMs: 900000,
+  planNudgeMs: 120000,
+  maxRounds: 60,
+  budgetUsd: 0,
+  budgetTokens: 0,
+  priceInputPerMTok: 0,
+  priceOutputPerMTok: 0,
+  loopTickMs: 10000,
+  stallAfterWakes: 6,
+})
+
+function validateConfigFallback(value) {
+  const issues = []
+  const input = value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const out = { ...CONFIG_DEFAULTS }
+  for (const key of ['dataDir', 'appsRoot', 'agentPreset', 'provider', 'model']) {
+    if (input[key] === undefined) continue
+    if (typeof input[key] !== 'string') issues.push({ message: `${key} must be a string`, path: [{ key }] })
+    else out[key] = input[key]
+  }
+  if (input.autoRun !== undefined) {
+    if (typeof input.autoRun !== 'boolean') issues.push({ message: 'autoRun must be a boolean', path: [{ key: 'autoRun' }] })
+    else out.autoRun = input.autoRun
+  }
+  for (const key of ['wakeCooldownMs', 'planTimeoutMs', 'planNudgeMs', 'maxRounds', 'budgetTokens', 'loopTickMs', 'stallAfterWakes']) {
+    if (input[key] === undefined) continue
+    const number = Number(input[key])
+    if (!Number.isInteger(number) || number < 0) issues.push({ message: `${key} must be a non-negative integer`, path: [{ key }] })
+    else out[key] = number
+  }
+  for (const key of ['budgetUsd', 'priceInputPerMTok', 'priceOutputPerMTok']) {
+    if (input[key] === undefined) continue
+    const number = Number(input[key])
+    if (!Number.isFinite(number) || number < 0) issues.push({ message: `${key} must be a non-negative number`, path: [{ key }] })
+    else out[key] = number
+  }
+  return issues.length > 0 ? { issues } : { value: out }
+}
+
+const fallbackConfig = {
+  '~standard': { version: 1, vendor: 'jos-workbench', validate: validateConfigFallback },
+}
+
+let Config = fallbackConfig
+try {
+  const schemastery = await import('@deepseek-ai/schemastery')
+  const z = schemastery.default ?? schemastery
+  if (typeof z?.object === 'function') {
+    Config = z.object({
+      dataDir: z.string().description('Where the ledger and deliveries live; empty means ~/.dsh/workbench.').default(''),
+      appsRoot: z.string().description('Root for app workspaces created by the closed loop; empty means <dataDir>/apps.').default(''),
+      agentPreset: z.string().description('Agent preset for delivery sessions; empty uses the deployment default.').default(''),
+      provider: z.string().description('Provider for the legacy host-side planner; empty uses the deployment default.').default(''),
+      model: z.string().description('Model for the legacy host-side planner; empty uses the deployment default.').default(''),
+      autoRun: z.boolean().description('Drive intake-created jobs automatically.').default(true),
+      wakeCooldownMs: z.number().min(0).description('Minimum gap between two wakes of the same agent.').default(4000),
+      planTimeoutMs: z.number().min(0).description('A planning turn that never submits a plan is handed to a person after this many milliseconds.').default(900000),
+      planNudgeMs: z.number().min(0).description('Send one planning reminder after this many milliseconds.').default(120000),
+      maxRounds: z.number().min(0).description('Wake-round trip breaker per job.').default(60),
+      budgetUsd: z.number().min(0).description('USD budget; 0 disables the gate (prices below must be set to make it meaningful).').default(0),
+      budgetTokens: z.number().min(0).description('Token budget; 0 disables the gate.').default(0),
+      priceInputPerMTok: z.number().min(0).description('USD per 1M input tokens; 0 keeps cost at 0.').default(0),
+      priceOutputPerMTok: z.number().min(0).description('USD per 1M output tokens; 0 keeps cost at 0.').default(0),
+      loopTickMs: z.number().min(0).description('Safety-net loop interval in milliseconds.').default(10000),
+      stallAfterWakes: z.number().min(0).description('Wakes without board progress before the stall gate fires.').default(6),
+    })
+  }
+} catch {
+  /* host package unavailable (unit tests): the Standard Schema fallback runs */
+}
+
+export { Config }
+
 const DEFAULTS = {
   dataDir: '',
   // Empty means "whatever this profile serves" — see resolveRoute().

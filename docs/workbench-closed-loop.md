@@ -177,7 +177,7 @@ findskill { query, taskId? }
 | **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
 | **G** ✅ | 面板：创建应用文案、需求文档上传、任务卡自动状态、显示名天工 | headless Chromium 截图复验（面板/任务/对话框/附件） |
 | **H** ✅ | token 记账（`usage` 事件、job 投影、token 预算熔断）、卡死看门狗、blocked→人工卡点、连接 fence/路径沙箱/store 保护、Dialog 可达性 | 259 用例 + 真机 `98,730 tokens` 记账与卡片展示 |
-| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 单价配置、旧项目清理、`export const Config`（schemastery 在本工作区 link 路径下不可裸解析，需宿主侧解析方案） | 已知官方约定缺口，不影响闭环 |
+| **H2** 🟡 | `export const Config` 已按官方形态补上（Schemastery，缺失时退回 Standard Schema；budget 0 表示关闭）；仍待：autopilot 兜底、真实 USD 单价配置、旧项目清理 | 重启后用 `Config.listConfigs` 验证 schema 生效 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）
 
