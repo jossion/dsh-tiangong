@@ -32,6 +32,9 @@ function fakeSessions(overrides = {}) {
       if (overrides.wake !== undefined) return overrides.wake(sessionId, text)
       return { ok: true }
     },
+    async measureUsage() {
+      return overrides.usage === undefined ? null : overrides.usage()
+    },
   }
 }
 
@@ -254,5 +257,63 @@ test('a planning turn that overruns gets one reminder, then waits for the hard t
     clock += 5_000
     await dispatcher.tick()
     assert.equal(sessions.calls.wake.length, 2, 'the reminder is not repeated')
+  })
+})
+
+test('token totals are recorded once they grow, and never shrink the ledger', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await seedPlan(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    let usage = { inputTokens: 120, outputTokens: 30 }
+    const sessions = fakeSessions({ usage: () => usage })
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, priceInputPerMTok: 0.5, priceOutputPerMTok: 2 },
+      events: log,
+      sessions,
+      now: () => 1_000_000,
+    })
+    await dispatcher.tick()
+    const lines = await createEventLog(join(dir, 'events.jsonl')).all()
+    const usageLine = lines.find(line => line.kind === 'usage')
+    assert.ok(usageLine !== undefined, 'usage is recorded')
+    assert.equal(usageLine.totalTokens, 150)
+    assert.equal(usageLine.costUsd, (120 * 0.5 + 30 * 2) / 1_000_000)
+  })
+})
+
+test('a stalled agent stops being woken and lands on a person', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await seedPlan(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    const sessions = fakeSessions()
+    let clock = 1_000_000
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, wakeCooldownMs: 1000, stallAfterWakes: 2 },
+      events: log,
+      sessions,
+      now: () => clock,
+    })
+
+    await dispatcher.tick()
+    clock += 5000
+    await dispatcher.tick()
+    const wakesBeforeStall = sessions.calls.wake.length
+    assert.equal(wakesBeforeStall, 2, 'two dispatch wakes happened')
+
+    clock += 5000
+    await dispatcher.tick()
+    const wakes = sessions.calls.wake.length
+    assert.equal(wakes, wakesBeforeStall, 'no third wake once stalled')
+
+    const all = await createEventLog(join(dir, 'events.jsonl')).all()
+    const decision = all.find(line => line.decision === 'ask_person')
+    assert.ok(decision !== undefined)
+    assert.match(JSON.stringify(decision.evidence), /stalled/)
   })
 })

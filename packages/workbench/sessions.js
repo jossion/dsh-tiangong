@@ -15,6 +15,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { foldUsage } from './usage.js'
 
 /** Minimal UserMessage the Session log accepts as a user/message event. */
 export function userMessage(text) {
@@ -237,6 +238,22 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   }
 
   /**
+   * Token usage of one Session, folded from its persisted assistant messages.
+   * Returns absolute totals (never a delta) so the ledger line is idempotent.
+   */
+  async function measureUsage(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return null
+    const controller = optional('sessionController')
+    if (controller === null || controller === undefined || typeof controller.inspect !== 'function') return null
+    try {
+      const inspection = await controller.inspect(sessionId)
+      return foldUsage(inspection?.events ?? [])
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Wake the delivery agent with one user message.
    * `ok:false` is a normal outcome (no session/agent mounted); the dispatcher
    * turns it into a human gate instead of retrying forever.
@@ -376,5 +393,5 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset }
   }
 
-  return { ensureProjectSession, ensureWorkspace, wake, prepare, resolveAgent, appRootFor }
+  return { ensureProjectSession, ensureWorkspace, wake, prepare, measureUsage, resolveAgent, appRootFor }
 }

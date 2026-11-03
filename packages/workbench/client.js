@@ -237,6 +237,7 @@ window.__ModuleLoader__.load({
         autoPlanning: 'auto · planning',
         autoRunning: 'auto · dispatching',
         autoWaiting: 'needs you',
+        tokensUsed: 'tokens',
         cardEmpty: 'No cards yet. Create the first one.',
         cardSubtitle: 'click to open',
         laneBusy: 'working',
@@ -605,6 +606,7 @@ window.__ModuleLoader__.load({
         autoPlanning: '自动·规划中',
         autoRunning: '自动·执行中',
         autoWaiting: '等你决定',
+        tokensUsed: 'tokens',
         cardEmpty: '还没有卡片，先创建一张。',
         cardSubtitle: '点击进入',
         laneBusy: '工作中',
@@ -2776,6 +2778,13 @@ window.__ModuleLoader__.load({
                     ? null
                     : h('div', { style: s.meter },
                         h('span', { style: { ...s.meterFill, background: accent, width: `${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%` } })),
+                  (() => {
+                    const tokens = (Number(job.tokens?.inputTokens) || 0) + (Number(job.tokens?.outputTokens) || 0)
+                    if (tokens <= 0) return null
+                    const cost = Number(job.costUsd) || 0
+                    return h('span', { style: { ...s.stageMeta, fontSize: '11px' } },
+                      `${tokens} ${t('tokensUsed')}${cost > 0 ? ` · $${cost.toFixed(4)}` : ''}`)
+                  })(),
                   h('span', { style: { ...s.stageMeta, color: done ? accent : 'var(--dsw-alias-label-secondary)' } }, done ? t('taskOpenDone') : t('taskOpenCockpit')))
               })))
     }
@@ -3651,10 +3660,46 @@ window.__ModuleLoader__.load({
 
     function Dialog(props) {
       const { title, children, error, busy, confirmLabel, cancelLabel, onCancel, onConfirm } = props
+      const panelRef = useRef(null)
+      // A modal owes the user three things: it is announced, focus stays inside
+      // it, and focus returns to the control that opened it.
       useEffect(() => {
-        const onKey = event => { if (event.key === 'Escape') onCancel() }
+        if (typeof document === 'undefined') return undefined
+        const previous = document.activeElement
+        const panel = panelRef.current
+        const focusables = () => panel === null
+          ? []
+          : [...panel.querySelectorAll('button, input, textarea, select, a[href]')]
+            .filter(el => el.disabled !== true && el.offsetParent !== null)
+        const first = focusables()[0]
+        if (first !== undefined && typeof first.focus === 'function') first.focus()
+        const onKey = event => {
+          if (event.key === 'Escape') {
+            event.preventDefault?.()
+            onCancel()
+            return
+          }
+          if (event.key !== 'Tab') return
+          const items = focusables()
+          if (items.length === 0) return
+          const index = items.indexOf(document.activeElement)
+          if (event.shiftKey && index <= 0) {
+            event.preventDefault?.()
+            items[items.length - 1].focus()
+          } else if (event.shiftKey === false && (index === items.length - 1 || index === -1)) {
+            event.preventDefault?.()
+            items[0].focus()
+          }
+        }
         window.addEventListener('keydown', onKey)
-        return () => window.removeEventListener('keydown', onKey)
+        const body = document.body
+        const previousOverflow = body.style.overflow
+        body.style.overflow = 'hidden'
+        return () => {
+          window.removeEventListener('keydown', onKey)
+          body.style.overflow = previousOverflow
+          if (previous !== null && typeof previous.focus === 'function') previous.focus()
+        }
       }, [onCancel])
       return h('div', {
         style: {
@@ -3664,6 +3709,11 @@ window.__ModuleLoader__.load({
         onClick: onCancel,
       },
         h('div', {
+          ref: panelRef,
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-label': title,
+          tabIndex: -1,
           style: { ...s.card, width: '420px', maxWidth: '88vw' },
           onClick: event => event.stopPropagation(),
         },

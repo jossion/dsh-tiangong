@@ -223,6 +223,8 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          tokens: null,
+          costUsd: 0,
           createdAt: null,
           updatedAt: null,
         }
@@ -253,6 +255,8 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          tokens: null,
+          costUsd: 0,
           createdAt: null,
           updatedAt: null,
         }
@@ -266,6 +270,41 @@ export function foldTasks(events) {
         ts: event.ts ?? null,
       }
       if (job.brief === null && typeof event.title === 'string' && event.title !== '') job.brief = event.title
+      job.updatedAt = event.ts ?? job.updatedAt
+      continue
+    }
+
+    if (kind === 'usage') {
+      if (typeof event.jobId !== 'string' || event.jobId === '') continue
+      let job = jobs.get(event.jobId)
+      if (job === undefined) {
+        job = {
+          id: event.jobId,
+          projectId: event.projectId ?? null,
+          title: null,
+          brief: null,
+          workspace: null,
+          workspaceId: null,
+          sessionId: null,
+          parentJobId: null,
+          kind: null,
+          status: 'created',
+          planBy: null,
+          planAt: null,
+          requirement: null,
+          tokens: null,
+          costUsd: 0,
+          createdAt: null,
+          updatedAt: null,
+        }
+        jobs.set(event.jobId, job)
+      }
+      // Totals are absolute, so a replayed line is idempotent.
+      job.tokens = {
+        inputTokens: Number(event.inputTokens) || 0,
+        outputTokens: Number(event.outputTokens) || 0,
+      }
+      job.costUsd = Number(event.costUsd) || 0
       job.updatedAt = event.ts ?? job.updatedAt
       continue
     }
@@ -288,6 +327,8 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          tokens: null,
+          costUsd: 0,
           createdAt: null,
           updatedAt: null,
         }
@@ -678,6 +719,8 @@ export function buildBoard(events, options = {}) {
         planBy: meta?.planBy ?? null,
         planAt: meta?.planAt ?? null,
         requirement: meta?.requirement ?? null,
+        tokens: meta?.tokens ?? null,
+        costUsd: meta?.costUsd ?? 0,
         parentJobId: meta?.parentJobId ?? null,
         kind: meta?.kind ?? null,
         status,

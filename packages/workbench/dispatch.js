@@ -17,6 +17,7 @@ import { DEFAULT_LOOP, nextStep, snapshotOf } from './orchestrator.js'
 import { readyWork } from './executor.js'
 import { planningDirective } from './requirements.js'
 import { decide } from './router.js'
+import { totalTokens, usageEvent } from './usage.js'
 
 /** A human gate repeats at most this often per job and reason. */
 const GATE_COOLDOWN_MS = 60 * 1000
@@ -69,6 +70,10 @@ function factsOf(store, jobId) {
       planNudges: 0,
       delivered: false,
       agentStatus: 'idle',
+      usageAt: 0,
+      lastSignature: null,
+      stallWakes: 0,
+      stalled: false,
     }
     store.set(jobId, facts)
   }
@@ -91,6 +96,7 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
     planTimeoutMs: Number(config.planTimeoutMs) > 0 ? Number(config.planTimeoutMs) : DEFAULT_LOOP.planTimeoutMs,
     maxRounds: Number(config.maxRounds) > 0 ? Number(config.maxRounds) : DEFAULT_LOOP.maxRounds,
     budgetUsd: Number.isFinite(Number(config.budgetUsd)) && config.budgetUsd !== null ? Number(config.budgetUsd) : null,
+    budgetTokens: Number.isFinite(Number(config.budgetTokens)) && config.budgetTokens !== null ? Number(config.budgetTokens) : null,
   })
 
   function serviceOptional(name) {
@@ -135,6 +141,11 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
     const result = await sessions.wake(job.sessionId, text)
     facts.lastWakeAt = now()
     facts.rounds += 1
+    if (mode === 'dispatch' && result.ok === true) {
+      facts.stallWakes = (facts.stallWakes ?? 0) + 1
+      const stallAfter = Number(config.stallAfterWakes) > 0 ? Number(config.stallAfterWakes) : 6
+      if (facts.stallWakes >= stallAfter) facts.stalled = true
+    }
     if (!result.ok) {
       await gate(project, job, 'wake-failed', result.error)
     }
@@ -216,6 +227,10 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
         return
       }
       case 'wake': {
+        if (facts.stalled === true) {
+          await gate(project, job, 'stalled', 'the delivery agent kept being woken without moving a card')
+          return
+        }
         const { work } = readyWork(board, { projectId: project.id, jobId: job.id, limit: 5 })
         if (work.length === 0) return
         const text = wakeText({ job, work })
@@ -265,6 +280,36 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
     }
   }
 
+  /**
+   * Record the Session's absolute token totals when they grew. Tokens are the
+   * machine evidence; USD stays 0 unless the deployment configures a price.
+   */
+  async function recordUsage(project, job, facts) {
+    if (typeof job.sessionId !== 'string' || job.sessionId === '') return
+    const usageAt = facts.usageAt ?? 0
+    if (now() - usageAt < 15_000) return
+    facts.usageAt = now()
+    const measured = await sessions.measureUsage(job.sessionId)
+    if (measured === null) return
+    const recorded = totalTokens(job.tokens)
+    const next = totalTokens(measured)
+    if (next <= recorded) return
+    try {
+      await events.append(usageEvent({
+        projectId: project.id,
+        jobId: job.id,
+        usage: measured,
+        price: {
+          priceInputPerMTok: Number(config.priceInputPerMTok) || 0,
+          priceOutputPerMTok: Number(config.priceOutputPerMTok) || 0,
+        },
+        ts: nowIso(now),
+      }))
+    } catch {
+      /* usage accounting must never break the loop */
+    }
+  }
+
   /** One pass over every managed, unfinished job. Safe to call concurrently. */
   async function tick() {
     if (ticking || disposed) return
@@ -286,12 +331,22 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
           if (!managed(job)) continue
           const facts = factsOf(runtime, job.id)
           if (job.planBy !== null && job.planBy !== undefined) facts.planning = false
+          // Any real board movement clears the stall counter.
+          const signature = `${job.progress?.done ?? 0}/${job.progress?.total ?? 0}/${job.planBy ?? ''}`
+          if (facts.lastSignature !== signature) {
+            facts.lastSignature = signature
+            facts.stallWakes = 0
+            facts.stalled = false
+          }
+          await recordUsage(project, job, facts)
           const snapshot = snapshotOf({
             job,
             config: loopConfig(),
             now: now(),
             runtime: {
               ...facts,
+              tokens: totalTokens(job.tokens),
+              costUsd: Number(job.costUsd) || 0,
               agentStatus: agentStatus.get(job.sessionId) ?? facts.agentStatus,
             },
           })

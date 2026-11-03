@@ -209,3 +209,13 @@ test('failed cards, budget and rounds all land on a person', () => {
   }))
   assert.equal(rounds.reason, 'rounds')
 })
+
+test('a token budget hands the job to a person', () => {
+  const action = nextStep(snapshot({
+    job: { roots: [task('a')] },
+    runtime: { tokens: 5000 },
+    config: { budgetTokens: 4000 },
+  }))
+  assert.equal(action.action, 'human-gate')
+  assert.equal(action.reason, 'budget-tokens')
+})

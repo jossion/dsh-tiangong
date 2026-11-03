@@ -176,7 +176,8 @@ findskill { query, taskId? }
 | **D** ✅ | `sessions.js`：项目专属会话 + 工作区、agent 创建/恢复、`followup` 唤醒、消息形状对齐宿主的 `user/message` | 无宿主服务时干净降级并落 human 卡点 |
 | **E** ✅ | `dispatch.js`：事件驱动 tick（tool/result、subagent/end、agent/status）+ 冷却/轮数/预算 + 交付去重 | 假 sessions 单测覆盖绑定→规划→派发→完成→卡点 |
 | **G** ✅ | 面板：创建应用文案、需求文档上传、任务卡自动状态、显示名天工 | headless Chromium 截图复验（面板/任务/对话框/附件） |
-| H | 审计遗留 P1：connection fence / 路径沙箱 / store 损坏保护 | 测试 + 手工验证 |
+| **H** 🟡 | 已做：token 记账（`usage` 事件、job 投影、token 预算熔断）、卡死看门狗（连续唤醒无进展 → 人工卡点）、连接 fence/路径沙箱/store 损坏保护、Dialog 可达性 | 257 用例；真机重启后生效 |
+| H2 | 待做：autopilot 兜底（插件直连 `subagents.startActivation`）、真实 USD 价格配置、旧项目清理 | 需要先核对 subagent provider 契约 |
 
 ## 12. 风险与待验证（实现时用实时契约确认）
 

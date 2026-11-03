@@ -367,3 +367,29 @@ test('waking mounts the deployment preset before delivering the prompt', async (
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('session usage is folded from persisted assistant messages', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const ctx = fakeCtx({
+      sessionController: {
+        async inspect() {
+          return {
+            events: [
+              { type: 'assistant/message', data: { usage: { inputTokens: 10, outputTokens: 2 } } },
+              { type: 'tool/result', data: {} },
+              { type: 'assistant/message', data: { usage: { inputTokens: 5, outputTokens: 1 } } },
+            ],
+          }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    assert.deepEqual(await bridge.measureUsage('session-abc'), {
+      inputTokens: 15, outputTokens: 3, messages: 2,
+    })
+    assert.equal(await bridge.measureUsage(''), null)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

@@ -23,6 +23,8 @@ export const DEFAULT_LOOP = {
   maxRounds: 60,
   /** `null` disables the budget gate. */
   budgetUsd: null,
+  /** `null` disables the token gate. Tokens are machine evidence; USD needs a price. */
+  budgetTokens: null,
 }
 
 const TERMINAL = new Set(['done', 'failed'])
@@ -120,13 +122,16 @@ export function snapshotOf({ job, runtime = {}, config = {}, now = Date.now() })
         && (gate?.kind === 'approval' || gate?.irreversible === true)).length,
       awaiting: gates.filter(gate => gate?.status === 'requested').length,
     },
+    usage: {
+      tokens: Number(runtime.tokens) || 0,
+      costUsd: Number(runtime.costUsd) || 0,
+    },
     runtime: {
       planning: runtime.planning === true,
       planningSince: runtime.planningSince ?? null,
       agentStatus: runtime.agentStatus ?? 'absent',
       lastWakeAt: runtime.lastWakeAt ?? 0,
       rounds: Number(runtime.rounds) || 0,
-      costUsd: Number(runtime.costUsd) || 0,
       delivered: runtime.delivered === true,
     },
   }
@@ -179,8 +184,11 @@ export function nextStep(snapshot) {
 
   // Budget and rounds are the loop's own circuit breakers: they hand the job to
   // a person instead of burning tokens forever.
-  if (config.budgetUsd !== null && runtime.costUsd >= config.budgetUsd) {
-    return { action: 'human-gate', reason: 'budget', jobId: job.id, costUsd: runtime.costUsd, budgetUsd: config.budgetUsd }
+  if (config.budgetUsd !== null && snapshot.usage.costUsd >= config.budgetUsd) {
+    return { action: 'human-gate', reason: 'budget', jobId: job.id, costUsd: snapshot.usage.costUsd, budgetUsd: config.budgetUsd }
+  }
+  if (config.budgetTokens !== null && snapshot.usage.tokens >= config.budgetTokens) {
+    return { action: 'human-gate', reason: 'budget-tokens', jobId: job.id, tokens: snapshot.usage.tokens, budgetTokens: config.budgetTokens }
   }
   if (runtime.rounds >= config.maxRounds) {
     return { action: 'human-gate', reason: 'rounds', jobId: job.id, rounds: runtime.rounds, maxRounds: config.maxRounds }

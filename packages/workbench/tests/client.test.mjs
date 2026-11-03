@@ -1388,3 +1388,11 @@ test('a job created by the requirement intake shows its automatic state', () => 
   assert.ok(strings2.includes('autoRunning'), 'after a plan it reads as dispatching')
   assert.ok(strings2.includes('autoWaiting'), 'a gate on the job asks for a person')
 })
+
+test('the modal is announced to assistive tech with a label', () => {
+  const element = Dialog({ title: '创建应用', confirmLabel: 'ok', cancelLabel: 'cancel', onCancel: () => {}, onConfirm: () => {} })
+  const panel = element.props.children
+  assert.equal(panel.props.role, 'dialog')
+  assert.equal(panel.props['aria-modal'], 'true')
+  assert.equal(panel.props['aria-label'], '创建应用')
+})
