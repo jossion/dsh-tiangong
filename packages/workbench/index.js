@@ -1776,6 +1776,66 @@ export function apply(ctx, row) {
     }),
   )
 
+  /**
+   * Delivery-session diagnostics. The closed loop crosses three host seams
+   * (session creation, preset composition, model selection); when a turn dies
+   * in prompt assembly this tool reports which seam failed instead of guessing.
+   */
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'workbench_delivery_diagnostics',
+      description:
+        'Diagnose the delivery session wiring for a project/job: which host services are mounted, '
+        + 'the resolved agent preset, the selected model, and the error from preparing the session. '
+        + 'Read-only; safe to call when a closed-loop job is stuck before its first plan.',
+      parameters: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'Project id; defaults to the only project when unambiguous.' },
+          jobId: { type: 'string', description: 'Job id; defaults to the project\'s newest job.' },
+          sessionId: { type: 'string', description: 'Explicit delivery session id.' },
+        },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: String(value) }],
+      },
+      async execute(input) {
+        const board = buildBoard(await events.all())
+        let project = null
+        let job = null
+        if (typeof input?.jobId === 'string' && input.jobId !== '') {
+          for (const candidate of board.projects) {
+            const found = (candidate.jobs || []).find(item => item.id === input.jobId)
+            if (found !== undefined) {
+              project = candidate
+              job = found
+              break
+            }
+          }
+        } else if (typeof input?.projectId === 'string' && input.projectId !== '') {
+          project = board.projects.find(item => item.id === input.projectId) ?? null
+          job = project?.jobs?.[0] ?? null
+        }
+        const sessionId = String(input?.sessionId ?? job?.sessionId ?? project?.sessionId ?? '')
+        const preparation = sessionId === ''
+          ? { error: 'no delivery session bound yet' }
+          : await sessionBridge.prepare(sessionId)
+        return JSON.stringify({
+          projectId: project?.id ?? null,
+          jobId: job?.id ?? null,
+          sessionId: sessionId === '' ? null : sessionId,
+          job: job === null ? null : {
+            status: job.status,
+            planBy: job.planBy,
+            hasRequirement: job.requirement !== null && job.requirement !== undefined,
+          },
+          preparation,
+        }, null, 2)
+      },
+    }),
+  )
+
   // ── the executor's two halves ────────────────────────────────────────────
   //
   // A plugin cannot spawn agents (that seam needs a parent Agent), so the plan

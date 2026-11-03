@@ -215,7 +215,8 @@ test('a headless profile keeps the tools and skips the route', async () => {
     assert.equal(routes.length, 0)
     assert.deepEqual(tools.map(tool => tool.name), [
       'workbench_plan_software', 'workbench_submit_plan', 'workbench_find_skill',
-      'workbench_next_work', 'workbench_add_task', 'workbench_report_work',
+      'workbench_delivery_diagnostics', 'workbench_next_work', 'workbench_add_task',
+      'workbench_report_work',
     ], 'the agent tools still register without a web server')
   })
 })

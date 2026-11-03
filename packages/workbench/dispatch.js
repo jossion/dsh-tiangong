@@ -146,6 +146,7 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
         event: mode,
         ok: result.ok === true,
         ...(result.ok === true ? {} : { error: String(result.error ?? 'unknown') }),
+        ...(result.preparation === undefined ? {} : { preparation: result.preparation }),
         ts: nowIso(now),
       })
     } catch {

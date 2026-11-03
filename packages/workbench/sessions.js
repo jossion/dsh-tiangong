@@ -157,7 +157,9 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
    * starts without it dies in prompt assembly ("{{model}} has no value").
    */
   async function selectDefaultModel(controller, sessionId) {
-    if (controller === null || controller === undefined || typeof controller.selectModel !== 'function') return null
+    if (controller === null || controller === undefined || typeof controller.selectModel !== 'function') {
+      return { selection: null, error: 'sessionController.selectModel unavailable' }
+    }
     let selection = null
     try {
       const model = optional('agentDefaultModel')
@@ -175,7 +177,9 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
         selection = null
       }
     }
-    if (selection === null || typeof selection.provider !== 'string' || typeof selection.model !== 'string') return null
+    if (selection === null || typeof selection.provider !== 'string' || typeof selection.model !== 'string') {
+      return { selection: null, error: 'no default model selection available' }
+    }
     try {
       await controller.selectModel({
         sessionId,
@@ -183,10 +187,53 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
         model: selection.model,
         ...(typeof selection.reasoningEffort === 'string' ? { reasoningEffort: selection.reasoningEffort } : {}),
       })
-      return { provider: selection.provider, model: selection.model }
-    } catch {
-      return null
+      return { selection: { provider: selection.provider, model: selection.model }, error: null }
+    } catch (error) {
+      return { selection: null, error: String(error?.message ?? error) }
     }
+  }
+
+  /**
+   * Install everything a fresh Session needs before its first turn, and report
+   * every step. Swallowing these failures silently is what made the live loop
+   * undiagnosable; the result is written to the ledger by the dispatcher.
+   */
+  async function prepare(sessionId) {
+    const controller = optional('sessionController')
+    const report = {
+      sessionId,
+      services: {
+        sessionController: controller !== null && controller !== undefined,
+        agentPresets: optional('agentPresets') !== null && optional('agentPresets') !== undefined,
+        agentDefaultModel: optional('agentDefaultModel') !== null && optional('agentDefaultModel') !== undefined,
+        agents: optional('agents') !== null && optional('agents') !== undefined,
+      },
+      preset: null,
+      presetError: null,
+      model: null,
+      modelError: null,
+    }
+    if (controller === null || controller === undefined) {
+      report.presetError = 'sessionController unavailable'
+      report.modelError = 'sessionController unavailable'
+      return report
+    }
+    if (!presetSelected.has(sessionId)) {
+      try {
+        report.preset = await ensureDefaultPreset(controller, sessionId)
+        if (report.preset === null) report.presetError = 'preset resolve/select returned nothing'
+      } catch (error) {
+        report.presetError = String(error?.message ?? error)
+      }
+      presetSelected.add(sessionId)
+    }
+    if (!modelSelected.has(sessionId)) {
+      const result = await selectDefaultModel(controller, sessionId)
+      report.model = result.selection
+      report.modelError = result.error
+      modelSelected.add(sessionId)
+    }
+    return report
   }
 
   /**
@@ -205,14 +252,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     if (controller !== null && controller !== undefined && typeof controller.prompt === 'function') {
       // A session created before the preset/model was installed (or created by
       // an older build of this bridge) must get both before its first turn.
-      if (!presetSelected.has(sessionId)) {
-        await ensureDefaultPreset(controller, sessionId)
-        presetSelected.add(sessionId)
-      }
-      if (!modelSelected.has(sessionId)) {
-        await selectDefaultModel(controller, sessionId)
-        modelSelected.add(sessionId)
-      }
+      const preparation = await prepare(sessionId)
       try {
         const receipt = await controller.prompt({
           requestId: randomUUID(),
@@ -220,7 +260,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
           mode: 'queue',
           content: [{ type: 'text', text: String(text) }],
         })
-        if (receipt?.accepted === true) return { ok: true, via: 'session-controller' }
+        if (receipt?.accepted === true) return { ok: true, via: 'session-controller', preparation }
       } catch {
         /* fall through to the followup path */
       }
@@ -267,9 +307,24 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       ? config.agentPreset.trim()
       : null
     const controller = optional('sessionController')
+    // Resolve the deployment default preset id so the created session is
+    // composed with it from the first turn (the controller's own fallback does
+    // not mount the composition in this host).
+    let presetId = preset
+    if (presetId === null) {
+      const presets = optional('agentPresets')
+      if (presets !== null && presets !== undefined && typeof presets.resolve === 'function') {
+        try {
+          const resolved = await presets.resolve(undefined)
+          if (typeof resolved?.id === 'string' && resolved.id !== '') presetId = resolved.id
+        } catch {
+          presetId = null
+        }
+      }
+    }
     if (controller !== null && controller !== undefined && typeof controller.create === 'function') {
       // session.create accepts workspaceId OR cwd, never both.
-      const request = preset === null ? {} : { agentPreset: preset }
+      const request = presetId === null ? {} : { agentPreset: presetId }
       if (typeof workspaceId === 'string' && workspaceId !== '') request.workspaceId = workspaceId
       else request.cwd = path
       let created
@@ -290,8 +345,8 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
         workspace: path,
         workspaceId,
         created: true,
-        agentPreset: created.agentPreset ?? preset,
-        model: selected,
+        agentPreset: created.agentPreset ?? presetId,
+        model: selected.selection,
       }
     }
 
@@ -321,5 +376,5 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset }
   }
 
-  return { ensureProjectSession, ensureWorkspace, wake, resolveAgent, appRootFor }
+  return { ensureProjectSession, ensureWorkspace, wake, prepare, resolveAgent, appRootFor }
 }
