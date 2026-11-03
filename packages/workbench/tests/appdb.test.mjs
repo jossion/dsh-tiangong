@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
-import { closeAppDb, listEmployees, openAppDb } from '../appdb.js'
+import { closeAppDb, createEmployee, listEmployees, openAppDb, updateEmployee } from '../appdb.js'
 
 /** The schema a delivered app shipped before employees gained org links. */
 const LEGACY_EMPLOYEES = `
@@ -48,6 +48,34 @@ test('an employee table that predates the org link is migrated in place', () => 
 
     const company = db.prepare('PRAGMA table_info(company)').all()
     assert.ok(company.length > 0, 'org tables exist beside the legacy employee table')
+  } finally {
+    closeAppDb(workspace)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an update accepts a row-shaped patch but still rejects truly unknown keys', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'workbench-appdb-'))
+  const workspace = join(dir, 'app')
+  try {
+    const created = createEmployee(workspace, { name: '李四', email: 'li@example.com' })
+    assert.equal(created.name, '李四')
+
+    // The edit dialog used to echo the whole row back, including display and
+    // bookkeeping columns; that must not fail the save.
+    const updated = updateEmployee(workspace, created.id, {
+      ...created,
+      companyName: '华之语文化传播（北京）有限公司',
+      departmentName: '董事会',
+      name: '李四改',
+    })
+    assert.equal(updated.name, '李四改')
+    assert.equal(updated.companyName, null, 'display columns stay derived, never stored')
+
+    assert.throws(
+      () => updateEmployee(workspace, created.id, { name: '李四改二', totallyUnknown: 1 }),
+      error => error.code === 'VALIDATION_ERROR' && /unknown field/.test(error.message),
+    )
   } finally {
     closeAppDb(workspace)
     rmSync(dir, { recursive: true, force: true })

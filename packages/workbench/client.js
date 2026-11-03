@@ -2418,7 +2418,21 @@ window.__ModuleLoader__.load({
         setFormError(null)
         setFormFields({})
         try {
-          const employee = { ...form.values }
+          // Send the editable contract only: the row also carries display and
+          // bookkeeping fields (companyName, created_at, …) that an update must
+          // not echo back to the host.
+          const values = form.values
+          const employee = {
+            name: values.name,
+            email: values.email,
+            phone: values.phone,
+            department: values.department,
+            job_title: values.job_title,
+            status: values.status,
+            hired_at: values.hired_at,
+            companyId: values.companyId,
+            departmentId: values.departmentId,
+          }
           if (employee.hired_at === '') employee.hired_at = null
           employee.companyId = employee.companyId === '' || employee.companyId === undefined ? null : Number(employee.companyId)
           employee.departmentId = employee.departmentId === '' || employee.departmentId === undefined ? null : Number(employee.departmentId)

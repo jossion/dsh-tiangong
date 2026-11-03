@@ -16,7 +16,7 @@
 
 - 数据库只用 SQLite（`node:sqlite`），不用 PostgreSQL（详见 README「技术约定」）
 - 账本 `~/.dsh/workbench/events.jsonl` 是唯一真相，视图状态放 localStorage
-- 改完必须 `cd packages/workbench && npm test`（当前 260 个用例）
+- 改完必须 `cd packages/workbench && npm test`（当前 261 个用例）
 
 ## 故障排查：桌面版启动失败
 

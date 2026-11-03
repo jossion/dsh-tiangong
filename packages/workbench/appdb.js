@@ -37,6 +37,12 @@ CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);
 const STATUSES = ['active', 'inactive']
 const FIELDS = ['name', 'email', 'phone', 'department', 'job_title', 'status', 'hired_at']
 const ORG_FIELDS = ['companyId', 'departmentId']
+/**
+ * Columns the read projection adds for display. A UI that echoes a full row
+ * back as a patch is not sending unknown data; ignore these instead of failing
+ * the save with "unknown field".
+ */
+const READ_ONLY_FIELDS = ['id', 'companyName', 'departmentName', 'company_name', 'department_name', 'created_at', 'updated_at']
 
 export class AppDbError extends Error {
   constructor(code, message, details = null) {
@@ -146,7 +152,8 @@ export function validateEmployee(input, { partial = false } = {}) {
       out.hired_at = value
     }
   }
-  const unknown = Object.keys(input).filter(key => !FIELDS.includes(key) && !ORG_FIELDS.includes(key) && key !== 'id')
+  const known = key => FIELDS.includes(key) || ORG_FIELDS.includes(key) || READ_ONLY_FIELDS.includes(key)
+  const unknown = Object.keys(input).filter(key => !known(key))
   if (unknown.length > 0) details.push({ field: unknown[0], message: 'unknown field' })
   if (details.length > 0) throw new AppDbError('VALIDATION_ERROR', details[0].message, details)
   if (partial && Object.keys(out).length === 0) throw new AppDbError('VALIDATION_ERROR', 'patch needs at least one field')
