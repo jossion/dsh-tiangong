@@ -26,9 +26,13 @@ CREATE TABLE IF NOT EXISTS employees (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_employees_status ON employees(status);
-CREATE INDEX IF NOT EXISTS idx_employees_company ON employees(company_id);
-CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department_id);
 `
+
+/**
+ * The org-link columns live outside DDL on purpose: an older employee table
+ * predates them, and `CREATE INDEX ... (company_id)` would fail before
+ * `ensureEmployeeColumns()` ever ran. Columns first, indexes after.
+ */
 
 const STATUSES = ['active', 'inactive']
 const FIELDS = ['name', 'email', 'phone', 'department', 'job_title', 'status', 'hired_at']
