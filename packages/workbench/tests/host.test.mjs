@@ -5,11 +5,11 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, EMPLOYEES_PATH, FINANCE_PATH, JOB_CONFIG_PATH, ORG_PATH, PICK_PATH, PROJECTS_PATH, SERVICES_PATH, START_PATH, STATE_PATH, TASK_PATH, apply, pickScript} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, EMPLOYEES_PATH, FINANCE_PATH, JOB_CONFIG_PATH, ORG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, SERVICES_PATH, START_PATH, STATE_PATH, TASK_PATH, apply, pickScript} from '../index.js'
 import { createEventLog } from '../events.js'
 import { buildXlsx } from './fixtures.mjs'
 import { DatabaseSync } from 'node:sqlite'
-import { buildBoard, projectEvent, taskEvent } from '../projects.js'
+import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
 
 /**
  * A minimal stand-in for the Cordis context.
@@ -134,7 +134,7 @@ test('the host mounts a read route and a write route, separately', async () => {
     apply(ctx, { dataDir })
 
     assert.deepEqual(routes.map(route => route.path).sort(),
-      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, EMPLOYEES_PATH, SERVICES_PATH, JOB_CONFIG_PATH, FINANCE_PATH, TASK_PATH, ORG_PATH, PICK_PATH, BROWSE_PATH].sort())
+      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, EMPLOYEES_PATH, SERVICES_PATH, JOB_CONFIG_PATH, FINANCE_PATH, TASK_PATH, ORG_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH].sort())
     assert.equal(STATE_PATH, '/workbench/state')
     assert.equal(START_PATH, '/workbench/start')
     assert.equal(PROJECTS_PATH, '/workbench/projects')
@@ -213,8 +213,8 @@ test('a headless profile keeps the tools and skips the route', async () => {
     assert.doesNotThrow(() => apply(ctx, { dataDir }), 'no web server must not break activation')
     assert.equal(routes.length, 0)
     assert.deepEqual(tools.map(tool => tool.name), [
-      'workbench_plan_software', 'workbench_next_work', 'workbench_add_task',
-      'workbench_report_work',
+      'workbench_plan_software', 'workbench_submit_plan', 'workbench_find_skill',
+      'workbench_next_work', 'workbench_add_task', 'workbench_report_work',
     ], 'the agent tools still register without a web server')
   })
 })
@@ -223,7 +223,7 @@ test('both routes disappear when the plugin is disposed', async () => {
   await withDataDir(async dataDir => {
     const { ctx, routes, disposers } = fakeContext()
     apply(ctx, { dataDir })
-    assert.equal(routes.length, 14)
+    assert.equal(routes.length, 15)
 
     const response = fakeResponse()
     await routes[0].handler({ method: 'GET' }, response)
@@ -1138,5 +1138,139 @@ test('employees can be linked to a company and a department of that company', as
     assert.equal(movedOk.status, 200)
     assert.equal(movedOk.body.data.companyName, '乙公司')
     assert.equal(movedOk.body.data.departmentName, '财务部')
+  })
+})
+
+test('the main agent can submit exactly one validated plan per job', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '公司管理' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '员工管理' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j2', title: '修改员工管理' }))
+
+    const submit = tools.find(tool => tool.name === 'workbench_submit_plan')
+    const result = JSON.parse(await submit.execute({
+      jobId: 'j1',
+      brief: '员工管理',
+      design: { entities: ['employee'] },
+      tasks: [
+        { id: 'db', title: '建员工表', owner: 'backend', stage: 'build' },
+        { id: 'api', title: '员工 API', owner: 'backend', stage: 'build', blockedBy: ['db'] },
+      ],
+    }))
+    assert.equal(result.tasks, 2)
+    assert.equal(result.planBy, 'agent')
+    assert.equal(result.files.length, 1, 'design.json is written next to the ledger')
+
+    // The tool writes through its own log instance; read the file again.
+    const board = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    const job = board.projects[0].jobs[0]
+    assert.equal(job.planBy, 'agent')
+    assert.equal(job.roots.length, 1, 'one build container card')
+    assert.deepEqual(job.roots[0].children.map(task => task.title), ['建员工表', '员工 API'])
+
+    // A plan is immutable: a change request is a new job.
+    await assert.rejects(
+      () => submit.execute({ jobId: 'j1', tasks: [{ id: 'x', title: 'x' }] }),
+      /already has a plan/,
+    )
+
+    // A rejected plan writes nothing at all.
+    await assert.rejects(
+      () => submit.execute({ jobId: 'j2', tasks: [{ id: 'a', title: 'a', owner: 'nobody' }] }),
+      /invalid plan/,
+    )
+    const after = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    const j2 = after.projects[0].jobs.find(item => item.id === 'j2')
+    assert.equal(j2.planBy, null)
+    assert.equal(j2.roots.length, 0)
+  })
+})
+
+test('a requirement opens a job, stores its document and keeps the text', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '公司管理' }))
+
+    const route = routes.find(item => item.path === REQUIREMENTS_PATH)
+    const response = fakeResponse()
+    await route.handler(postRequest({
+      projectId: 'p1',
+      title: '员工管理',
+      text: '## 需求\n给公司管理加员工管理页',
+    }), response)
+    assert.equal(response.status, 202)
+    const body = JSON.parse(response.body)
+    assert.match(body.jobId, /^deliveries_/)
+    assert.equal(body.requirement.title, '员工管理')
+    assert.equal(body.requirement.source, 'text')
+
+    const board = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    const job = board.projects[0].jobs.find(item => item.id === body.jobId)
+    assert.equal(job.requirement.text, '## 需求\n给公司管理加员工管理页')
+    assert.equal(job.requirement.source, 'text')
+    assert.equal(job.status, 'created')
+
+    const stored = await readFile(join(dataDir, body.requirement.file), 'utf8')
+    assert.match(stored, /员工管理页/)
+    assert.match(stored, /job: deliveries_/)
+  })
+})
+
+test('an uploaded markdown requirement is decoded; bad input is refused', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '公司管理' }))
+
+    const route = routes.find(item => item.path === REQUIREMENTS_PATH)
+    const uploaded = fakeResponse()
+    await route.handler(postRequest({
+      projectId: 'p1',
+      file: { name: 'requirement.md', base64: Buffer.from('# 报销流程\n实现报销单').toString('base64') },
+    }), uploaded)
+    assert.equal(uploaded.status, 202)
+    const body = JSON.parse(uploaded.body)
+    assert.equal(body.requirement.source, 'upload')
+    assert.equal(body.requirement.title, '报销流程')
+
+    const unknownProject = fakeResponse()
+    await route.handler(postRequest({ projectId: 'nope', text: 'x' }), unknownProject)
+    assert.equal(unknownProject.status, 404)
+
+    const empty = fakeResponse()
+    await route.handler(postRequest({ projectId: 'p1', text: '   ' }), empty)
+    assert.equal(empty.status, 400)
+    assert.equal(JSON.parse(empty.body).error.code, 'invalid-requirement')
+
+    const wrongMethod = fakeResponse()
+    await route.handler({ method: 'GET' }, wrongMethod)
+    assert.equal(wrongMethod.status, 405)
+  })
+})
+
+test('skill discovery degrades cleanly when no skill service is mounted', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+    const find = tools.find(tool => tool.name === 'workbench_find_skill')
+    const parsed = JSON.parse(await find.execute({ query: 'database migration', taskId: 'job-1:wi:db' }))
+    assert.equal(parsed.query, 'database migration')
+    assert.deepEqual(parsed.sessionSkills, [])
+    assert.deepEqual(parsed.market, [])
+    assert.ok(parsed.howToUse.length >= 2)
+
+    // The lookup still lands in the ledger, even without services.
+    const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
+    const skill = lines.find(line => line.kind === 'skill')
+    assert.equal(skill.taskId, 'job-1:wi:db')
+    assert.equal(skill.query, 'database migration')
+
+    await assert.rejects(() => find.execute({ query: '   ' }), /query is required/)
   })
 })

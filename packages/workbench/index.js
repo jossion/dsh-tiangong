@@ -15,13 +15,13 @@
  * still activates in a profile that lacks them.
  */
 import { existsSync, statSync } from 'node:fs'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, isAbsolute } from 'node:path'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog, summarize } from './events.js'
-import { buildBoard, foldTasks, jobEvent, projectEvent, taskEvent } from './projects.js'
+import { artifactEvent, buildBoard, foldTasks, jobEvent, projectEvent, requirementEvent, taskEvent } from './projects.js'
 import { AppDbError, createEmployee, deleteEmployee, listEmployees, updateEmployee } from './appdb.js'
 import {
   OrgError, createCompany, createDepartment, createJobLevel, deleteCompany, deleteDepartment, deleteJobLevel,
@@ -29,6 +29,9 @@ import {
 } from './orgdb.js'
 import { disposeAll, listServices, ServiceError, startService, stopService } from './services.js'
 import { readyWork, reportEvents } from './executor.js'
+import { PlanError, assertPlan, buildCardId, planEvents } from './planner.js'
+import { RequirementError, assertRequirement, storeRequirement } from './requirements.js'
+import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills } from './skillfind.js'
 import { readFinanceLedger } from './ledgerdb.js'
 import {
   DEFAULT_FINANCE_DIR,
@@ -61,6 +64,9 @@ export const CONFIG_PATH = '/workbench/project-config'
 export const EMPLOYEES_PATH = '/workbench/employees'
 export const SERVICES_PATH = '/workbench/services'
 export const JOB_CONFIG_PATH = '/workbench/job-config'
+/** Requirements: one route, POST only. A requirement opens a job. */
+export const REQUIREMENTS_PATH = '/workbench/requirements'
+
 /** Finance: one route, read on GET, import/configure on POST. */
 export const FINANCE_PATH = '/workbench/finance'
 export const ORG_PATH = '/workbench/organization'
@@ -93,17 +99,24 @@ function sendJson(response, status, value) {
 /** Cap the request body: a requirement is a paragraph, not an upload. */
 const MAX_BODY_BYTES = 16 * 1024
 
+/**
+ * A requirement document is uploaded as base64 inside JSON, so the one route
+ * that accepts one needs a wider cap. It is still bounded: the decoded file is
+ * limited by `requirements.js`, and this is only the transport ceiling.
+ */
+const MAX_UPLOAD_BYTES = 1024 * 1024
+
 /** Read a JSON request body from a Node stream (or a pre-set string in tests). */
-async function readJsonBody(request) {
+async function readJsonBody(request, limit = MAX_BODY_BYTES) {
   if (typeof request.body === 'string') {
-    if (request.body.length > MAX_BODY_BYTES) throw new Error('body too large')
+    if (request.body.length > limit) throw new Error('body too large')
     return JSON.parse(request.body)
   }
   let size = 0
   const chunks = []
   for await (const chunk of request) {
     size += chunk.length
-    if (size > MAX_BODY_BYTES) throw new Error('body too large')
+    if (size > limit) throw new Error('body too large')
     chunks.push(chunk)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
@@ -1236,6 +1249,83 @@ export function apply(ctx, row) {
     },
   }
 
+  /**
+   * A requirement opens a job: the project is the container, the job is this
+   * one delivery. The session that will plan it is bound by the delivery loop,
+   * so this route only records the input — the board stays the progress channel.
+   */
+  const requirementsRoute = {
+    kind: 'exact',
+    path: REQUIREMENTS_PATH,
+    handler: async (request, response) => {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+        return
+      }
+      if (!isSameOrigin(request)) {
+        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
+        return
+      }
+      let body = null
+      try {
+        body = await readJsonBody(request, MAX_UPLOAD_BYTES)
+      } catch (error) {
+        sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
+        return
+      }
+      let requirement = null
+      try {
+        requirement = assertRequirement(body)
+      } catch (error) {
+        if (error instanceof RequirementError) {
+          sendJson(response, 400, {
+            error: { code: 'invalid-requirement', message: error.message, details: error.issues },
+          })
+          return
+        }
+        throw error
+      }
+      const board = buildBoard(await events.all())
+      const project = board.projects.find(item => item.id === requirement.projectId)
+      if (project === undefined) {
+        sendJson(response, 404, { error: { code: 'project-not-found', message: `unknown project: ${requirement.projectId}` } })
+        return
+      }
+      if (project.status === 'paused' || project.status === 'cancelled') {
+        sendJson(response, 409, { error: { code: 'project-stopped', message: `project is ${project.status}` } })
+        return
+      }
+      const now = new Date().toISOString()
+      const jobId = `deliveries_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      const stored = await storeRequirement(config.dataDir, jobId, requirement)
+      const brief = requirement.text.slice(0, 280)
+      await events.append(projectEvent({ projectId: project.id, event: 'started', brief, ts: now }))
+      await events.append(jobEvent({
+        projectId: project.id, jobId, title: requirement.title, brief, event: 'created', ts: now,
+      }))
+      await events.append(requirementEvent({
+        projectId: project.id,
+        jobId,
+        title: requirement.title,
+        text: requirement.text,
+        source: requirement.source,
+        file: stored.relative,
+        ts: now,
+      }))
+      sendJson(response, 202, {
+        status: 'accepted',
+        projectId: project.id,
+        jobId,
+        requirement: {
+          title: requirement.title,
+          source: requirement.source,
+          chars: requirement.text.length,
+          file: stored.relative,
+        },
+      })
+    },
+  }
+
   const pickRoute = {
     kind: 'exact',
     path: PICK_PATH,
@@ -1308,6 +1398,7 @@ export function apply(ctx, row) {
         webServer.register(projectsRoute),
         webServer.register(controlRoute),
         webServer.register(decideRoute),
+        webServer.register(requirementsRoute),
         webServer.register(configRoute),
         webServer.register(employeesRoute),
         webServer.register(servicesRoute),
@@ -1385,6 +1476,202 @@ export function apply(ctx, row) {
           `Work items: ${result.design?.workItems?.length ?? 0}`,
           `Artefacts: ${result.artifactDir ?? config.dataDir}`,
         ].join('\n')
+      },
+    }),
+  )
+
+  // The main agent owns understanding; this tool owns the shape of a plan. One
+  // validated graph per job, written as ledger lines, so the dispatcher and the
+  // board read the same truth. A rejected plan reports every issue at once.
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'workbench_submit_plan',
+      description:
+        'Submit the work graph for a job after understanding the requirement with the relevant '
+        + 'skills. One plan per job: a DAG of work items (title, owner, stage, blockedBy) that the '
+        + 'board dispatches. A rejected plan returns every issue at once: fix them and resubmit. '
+        + 'Use workbench_report_work for progress; this tool is planning only.',
+      parameters: {
+        type: 'object',
+        properties: {
+          jobId: { type: 'string', description: 'The job this plan delivers (required).' },
+          projectId: { type: 'string', description: 'Project id; derived from the job when omitted.' },
+          brief: { type: 'string', description: 'One-paragraph restatement of the requirement.' },
+          roles: { type: 'array', items: { type: 'object' }, description: 'Optional role/permission matrix.' },
+          design: { type: 'object', description: 'Optional data model and API surface.' },
+          tasks: {
+            type: 'array',
+            description: 'Work items; ids are local and referenced by blockedBy/parentId.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', description: 'Local id, unique inside this plan.' },
+                title: { type: 'string' },
+                owner: { type: 'string', enum: ['backend', 'frontend', 'qa', 'workbench'] },
+                stage: { type: 'string', enum: ['brief', 'roles', 'design', 'build', 'verify', 'report'] },
+                parentId: { type: 'string', description: 'Another task id; defaults to the build card.' },
+                blockedBy: { type: 'array', items: { type: 'string' } },
+                instructions: { type: 'string' },
+                acceptance: { type: 'string' },
+                skill: { type: 'string', description: 'Suggested skill for the executor, if known.' },
+              },
+              required: ['id', 'title'],
+            },
+          },
+        },
+        required: ['jobId', 'tasks'],
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: String(value) }],
+      },
+      async execute(input) {
+        const jobId = String(input?.jobId ?? '').trim()
+        if (jobId === '') throw new PlanError(['jobId is required'])
+        const board = buildBoard(await events.all())
+        let project = null
+        let job = null
+        for (const candidate of board.projects) {
+          const found = (candidate.jobs || []).find(item => item.id === jobId)
+          if (found !== undefined) {
+            project = candidate
+            job = found
+            break
+          }
+        }
+        if (job === null) throw new Error(`unknown job: ${jobId}`)
+        // A plan is immutable once written: a change request is a new job, so
+        // the old job's completion stays a historical fact.
+        if (job.roots.length > 0 || job.planBy !== null) {
+          throw new Error(`job ${jobId} already has a plan; open a new job for a change request`)
+        }
+        const plan = assertPlan({ ...input, jobId, projectId: project.id })
+        const now = new Date().toISOString()
+        const dir = join(config.dataDir, 'deliveries', jobId)
+        const files = []
+        if (plan.roles.length > 0 || plan.design !== null) {
+          await mkdir(dir, { recursive: true })
+          if (plan.roles.length > 0) {
+            const path = join(dir, 'roles.json')
+            await writeFile(path, `${JSON.stringify({ roles: plan.roles }, null, 2)}\n`, 'utf8')
+            files.push(path)
+          }
+          if (plan.design !== null) {
+            const path = join(dir, 'design.json')
+            await writeFile(path, `${JSON.stringify(plan.design, null, 2)}\n`, 'utf8')
+            files.push(path)
+          }
+        }
+        for (const line of planEvents(plan, { now })) await events.append(line)
+        const container = buildCardId(jobId)
+        for (const path of files) await events.append(artifactEvent({ taskId: container, path }))
+        return JSON.stringify({
+          jobId,
+          projectId: project.id,
+          tasks: plan.tasks.length,
+          planBy: 'agent',
+          files,
+          nextStep: 'call workbench_next_work to start dispatching ready work',
+        })
+      },
+    }),
+  )
+
+  /**
+   * Skill discovery. The session catalog is checked first (free to use), the
+   * plugin market second (install first, a person approves). Lookups are logged
+   * as `skill` lines so the `which_skill` decision can learn from history.
+   */
+  ctx.effect(() =>
+    ctx.tools.register({
+      name: 'workbench_find_skill',
+      description:
+        'Find a skill for the work you are about to do. Searches the current session\'s skill '
+        + 'catalog first and, when nothing matches, the configured plugin market. Use it before '
+        + 'starting a task when you are unsure which skill applies; a market hit is not installed '
+        + 'yet. Returns candidates with the reason each one matched.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What the work is about, e.g. "database migration" or "报价单 PRD".' },
+          taskId: { type: 'string', description: 'Optional work item id; recorded with the lookup.' },
+          includeMarket: { type: 'boolean', description: 'Search the plugin market too (default true).' },
+        },
+        required: ['query'],
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: String(value) }],
+      },
+      async execute(input) {
+        const query = String(input?.query ?? '').trim()
+        if (query === '') throw new Error('query is required')
+
+        const optional = name => {
+          try {
+            return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+          } catch {
+            return undefined
+          }
+        }
+
+        let session = []
+        const skillsService = optional('skills')
+        if (skillsService && typeof skillsService.list === 'function') {
+          try {
+            session = rankSkills(await skillsService.list({}), query)
+          } catch {
+            session = []
+          }
+        }
+
+        const market = []
+        const marketErrors = []
+        if (input?.includeMarket !== false) {
+          const marketService = optional('pluginMarket')
+          if (marketService && typeof marketService.search === 'function') {
+            let indexes = []
+            try {
+              indexes = typeof marketService.listIndexes === 'function' ? marketService.listIndexes() : []
+            } catch (error) {
+              marketErrors.push({ index: 'listIndexes', error: String(error?.message ?? error) })
+            }
+            for (const index of (Array.isArray(indexes) ? indexes : []).slice(0, SKILL_LIMITS.maxIndexes)) {
+              if (typeof index?.url !== 'string' || index.url === '' || typeof index.error === 'string') continue
+              try {
+                const page = await marketService.search(index.url, {
+                  text: query,
+                  sort: { kind: 'relevance' },
+                  offset: 0,
+                  limit: SKILL_LIMITS.maxMarketEntries,
+                })
+                const entries = marketCandidates(page?.entries ?? [])
+                if (entries.length > 0) {
+                  market.push({ index: typeof index.title === 'string' ? index.title : index.url, entries })
+                }
+              } catch (error) {
+                marketErrors.push({ index: index.url, error: String(error?.message ?? error) })
+              }
+            }
+          }
+        }
+
+        const taskId = String(input?.taskId ?? '').trim()
+        if (taskId !== '') {
+          try {
+            await events.append({
+              kind: 'skill',
+              taskId,
+              query,
+              session: session.map(item => item.name),
+              market: market.flatMap(entry => entry.entries.map(item => item.name)),
+              ts: new Date().toISOString(),
+            })
+          } catch {
+            /* the lookup must not fail because its audit line could not be written */
+          }
+        }
+        return formatSkillResult({ query, session, market, marketErrors })
       },
     }),
   )

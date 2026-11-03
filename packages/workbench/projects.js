@@ -67,6 +67,30 @@ export function jobEvent(input = {}) {
   return { ...input, kind: 'job', event }
 }
 
+/**
+ * One plan line: the main agent (or the fallback planner) submitted the work
+ * graph for a job. The cards themselves are separate `task` lines.
+ */
+export function planEvent(input = {}) {
+  const { projectId, jobId } = input
+  if (typeof projectId !== 'string' || projectId === '') throw new Error('a plan event needs a projectId')
+  if (typeof jobId !== 'string' || jobId === '') throw new Error('a plan event needs a jobId')
+  const event = input.event ?? 'submitted'
+  if (event !== 'submitted') throw new Error(`unknown plan event: ${event}`)
+  return { ...input, kind: 'plan', event }
+}
+
+/** One requirement line: the input the job exists to deliver. */
+export function requirementEvent(input = {}) {
+  const { projectId, jobId } = input
+  if (typeof projectId !== 'string' || projectId === '') throw new Error('a requirement event needs a projectId')
+  if (typeof jobId !== 'string' || jobId === '') throw new Error('a requirement event needs a jobId')
+  if (typeof input.text !== 'string' || input.text.trim() === '') throw new Error('a requirement event needs text')
+  const event = input.event ?? 'submitted'
+  if (event !== 'submitted') throw new Error(`unknown requirement event: ${event}`)
+  return { ...input, kind: 'requirement', event }
+}
+
 export function projectEvent(input = {}) {
   const { projectId } = input
   const event = input.event ?? 'created'
@@ -149,7 +173,7 @@ function ensureTask(tasks, id, seed) {
 }
 
 /** Descriptive fields: a later line refines them, and never blanks them. */
-const DESCRIPTIVE = ['title', 'parentId', 'projectId', 'jobId', 'stage', 'owner', 'role', 'instructions', 'discovered']
+const DESCRIPTIVE = ['title', 'parentId', 'projectId', 'jobId', 'stage', 'owner', 'role', 'instructions', 'acceptance', 'skill', 'discovered']
 
 /**
  * Log order, not clock order. Appends within one run share a millisecond, so
@@ -179,6 +203,73 @@ export function foldTasks(events) {
     if (event === null || typeof event !== 'object') continue
     const kind = event.kind ?? 'decision'
 
+    if (kind === 'plan') {
+      if (typeof event.jobId !== 'string' || event.jobId === '') continue
+      let job = jobs.get(event.jobId)
+      if (job === undefined) {
+        // A plan line is enough to open a minimal job entry; the job's own
+        // created event normally comes first.
+        job = {
+          id: event.jobId,
+          projectId: event.projectId ?? null,
+          title: null,
+          brief: null,
+          workspace: null,
+          workspaceId: null,
+          sessionId: null,
+          parentJobId: null,
+          kind: null,
+          status: 'created',
+          planBy: null,
+          planAt: null,
+          requirement: null,
+          createdAt: null,
+          updatedAt: null,
+        }
+        jobs.set(event.jobId, job)
+      }
+      job.planBy = typeof event.by === 'string' && event.by !== '' ? event.by : 'agent'
+      job.planAt = event.ts ?? job.planAt
+      if (job.brief === null && typeof event.brief === 'string' && event.brief !== '') job.brief = event.brief
+      job.updatedAt = event.ts ?? job.updatedAt
+      continue
+    }
+
+    if (kind === 'requirement') {
+      if (typeof event.jobId !== 'string' || event.jobId === '') continue
+      let job = jobs.get(event.jobId)
+      if (job === undefined) {
+        job = {
+          id: event.jobId,
+          projectId: event.projectId ?? null,
+          title: null,
+          brief: null,
+          workspace: null,
+          workspaceId: null,
+          sessionId: null,
+          parentJobId: null,
+          kind: null,
+          status: 'created',
+          planBy: null,
+          planAt: null,
+          requirement: null,
+          createdAt: null,
+          updatedAt: null,
+        }
+        jobs.set(event.jobId, job)
+      }
+      job.requirement = {
+        text: typeof event.text === 'string' ? event.text : '',
+        file: typeof event.file === 'string' && event.file !== '' ? event.file : null,
+        source: typeof event.source === 'string' ? event.source : 'text',
+        title: typeof event.title === 'string' ? event.title : null,
+        ts: event.ts ?? null,
+      }
+      if (job.brief === null && typeof event.title === 'string' && event.title !== '') job.brief = event.title
+      job.updatedAt = event.ts ?? job.updatedAt
+      continue
+    }
+
     if (kind === 'job') {
       if (typeof event.jobId !== 'string' || event.jobId === '') continue
       let job = jobs.get(event.jobId)
@@ -194,6 +285,9 @@ export function foldTasks(events) {
           parentJobId: null,
           kind: null,
           status: 'created',
+          planBy: null,
+          planAt: null,
+          requirement: null,
           createdAt: null,
           updatedAt: null,
         }
@@ -573,6 +667,9 @@ export function buildBoard(events, options = {}) {
         workspace: meta?.workspace ?? project.workspace ?? null,
         workspaceId: meta?.workspaceId ?? null,
         sessionId: meta?.sessionId ?? null,
+        planBy: meta?.planBy ?? null,
+        planAt: meta?.planAt ?? null,
+        requirement: meta?.requirement ?? null,
         parentJobId: meta?.parentJobId ?? null,
         kind: meta?.kind ?? null,
         status,

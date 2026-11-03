@@ -169,12 +169,12 @@ findskill { query, taskId? }
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| **A** ✅ 本次 | 契约文档 + `orchestrator.js` 状态机 + 单测 | `npm test` 全绿 |
-| B | `planner.js` + `submit_plan` 工具 + 计划校验 | 非法计划被拒、合法计划成树 |
-| C | `requirements.js` + 上传/提交接口 + 规划指令 | 文本/文档需求落账并唤醒 |
+| **A** ✅ | 契约文档 + `orchestrator.js` 状态机 + 单测 | `npm test` 全绿 |
+| **B** ✅ | `planner.js` + `workbench_submit_plan` 工具 + `plan` 投影 | 非法计划被拒、合法计划成树、一 job 一计划 |
+| **C** ✅ | `requirements.js` + `POST /workbench/requirements`（文本/md/txt 上传）+ 规划指令 | 需求落账、可读文件、指令含 jobId 与技能提示 |
+| **F** ✅ | `skillfind.js` + `workbench_find_skill`（会话目录 + 插件市场 + 审计行） | 无宿主服务时干净降级；命中带理由 |
 | D | `sessions.js`：建会话、绑定、prompt section、wake | 新项目自动有专属会话，能收到规划指令 |
 | E | `dispatch.js`：事件驱动循环 + 冷却 + 预算 + autopilot | 无人工点击推进到 done |
-| F | `skillfind.js` + 工具 + 子 agent 提示 | 子 agent 能查到会话技能/市场候选 |
 | G | 面板：创建应用、需求上传、自动运行状态、卡点 | 截图复验（先过 UI 技能） |
 | H | 审计遗留 P1：connection fence / 路径沙箱 / store 损坏保护 | 测试 + 手工验证 |
 
