@@ -17,3 +17,10 @@ packages/workbench/preview/.chrome-profile/
 
 # dependencies
 node_modules/
+
+# Internal development material: reference docs, agent instructions, design
+# notes and local maintenance scripts. Kept on disk, never published.
+_dsh_ref/
+AGENTS.md
+docs/
+scripts/
