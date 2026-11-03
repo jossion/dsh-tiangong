@@ -1,0 +1,65 @@
+{
+  "name": "@jos/workbench",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Tiangong: a requirement-driven autonomous delivery workbench for DSH.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "locale/*.json",
+    "*.js",
+    "icon.svg",
+    "assets/icon-180.png",
+    "docs/assets/*.png",
+    "README.md",
+    "LICENSE"
+  ],
+  "icon": "./icon.svg",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "preview": "node preview/seed.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jossion/dsh-tiangong.git",
+    "directory": "packages/workbench"
+  },
+  "homepage": "https://github.com/jossion/dsh-tiangong/tree/main/packages/workbench#readme",
+  "bugs": {
+    "url": "https://github.com/jossion/dsh-tiangong/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "workbench",
+    "autonomous-delivery",
+    "agent-orchestration",
+    "requirement-to-delivery"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.0 <0.3.0-0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  }
+}

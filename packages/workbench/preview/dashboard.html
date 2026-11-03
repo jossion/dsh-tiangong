@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Workbench · 决策面板预览</title>
+<style>
+  /* Artwork preview: free colours. The real panel inherits --dsw-alias-* and
+     therefore follows the host's light/dark theme instead of this palette. */
+  :root {
+    --bg: #0d1017;
+    --layer: #151a23;
+    --line: #232a36;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --code: #2ea043;
+    --frontier: #d29922;
+    --human: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 28px 56px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 ui-sans-serif, -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+  h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 0; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { flex: 1 1 130px; background: var(--layer); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  .card { background: var(--layer); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--line); }
+  .bar > i { display: block; height: 100%; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+  .stream { display: flex; flex-direction: column; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .row:last-child { border-bottom: 0; }
+  .name { flex: 0 0 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .value { flex: 1 1 auto; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { position: relative; flex: 0 0 64px; height: 4px; border-radius: 999px; background: var(--line); }
+  .track > i { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; }
+  .conf { flex: 0 0 34px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .wait li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); list-style: none; }
+  .wait { margin: 0; padding: 0; }
+  .wait li:last-child { border-bottom: 0; }
+  .empty { color: var(--muted); font-size: 13px; margin: 0; }
+  footer { color: var(--muted); font-size: 12px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Workbench · 决策面板</h1>
+    <p class="sub">一份事件流的投影：谁做的决定、有多确定、落在哪条泳道。这是静态预览，数据来自 <code>preview/out/data.js</code>。</p>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="card">
+    <h2>泳道分流</h2>
+    <div class="bar" id="bar"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>决策流</h2>
+    <div class="stream" id="stream"></div>
+  </section>
+
+  <section class="card">
+    <h2>等你决定</h2>
+    <ul class="wait" id="waiting"></ul>
+  </section>
+
+  <footer>真实面板在 DSH 的工作台里，颜色跟随宿主主题；这份预览用的是深色底，只为看清信息结构。</footer>
+</div>
+
+<script src="./out/data.js"></script>
+<script>
+  const LANES = { code: '代码', frontier: 'AI', human: '你' }
+  const HINTS = { code: '精确规则，不调模型', frontier: '交回前沿模型', human: '不可逆，永不自动' }
+  const COLORS = { code: 'var(--code)', frontier: 'var(--frontier)', human: 'var(--human)' }
+
+  const state = window.__WORKBENCH_STATE__ || null
+  const $ = id => document.getElementById(id)
+
+  if (!state) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<p class="empty" style="padding:0 28px">没有数据：先在 packages/workbench 下跑 <code>npm run preview</code>。</p>')
+  } else {
+    const { summary, events } = state
+    const split = summary.lanes.split
+    const counts = summary.lanes.counts
+
+    $('stats').innerHTML = [
+      ['forks', summary.forks],
+      ['decisions', summary.decisions],
+      ['held for you', summary.held],
+      ['spent', '$' + Number(summary.spentUsd).toFixed(4)],
+    ].map(([label, value]) =>
+      `<div class="stat"><b>${value}</b><span>${label}</span></div>`).join('')
+
+    $('bar').innerHTML = ['code', 'frontier', 'human'].map(lane =>
+      `<i style="width:${split[lane] || 0}%;background:${COLORS[lane]}"></i>`).join('')
+
+    $('legend').innerHTML = ['code', 'frontier', 'human'].map(lane =>
+      `<span><i class="dot" style="background:${COLORS[lane]}"></i>${LANES[lane]} ${split[lane] || 0}%` +
+      ` · ${counts[lane] || 0} · ${HINTS[lane]}</span>`).join('')
+
+    $('stream').innerHTML = events.length === 0
+      ? '<p class="empty">还没有记录到决策。</p>'
+      : events.map(event => {
+          const conf = Number(event.confidence) || 0
+          // An approval reads as the task it is holding, not as "yes".
+          // Other human-lane rows ("which file", 0.40) still read as a value.
+          const asking = event.decision === 'ask_person' || event.irreversible === true
+          const detail = asking && event.task ? event.task : String(event.value ?? '—')
+          return `<div class="row">
+            <i class="dot" style="background:${COLORS[event.lane] || COLORS.code}"></i>
+            <span class="name">${escapeHtml(event.question || event.decision || '—')}</span>
+            <span class="value">${escapeHtml(detail)}</span>
+            <span class="track"><i style="width:${Math.round(conf * 100)}%;background:${COLORS[event.lane] || COLORS.code}"></i></span>
+            <span class="conf">${conf.toFixed(2)}</span>
+          </div>`
+        }).join('')
+
+    $('waiting').innerHTML = (summary.waiting || []).length === 0
+      ? '<p class="empty">没有东西在等人。</p>'
+      : summary.waiting.map(event =>
+          `<li><span>${escapeHtml(event.task || String(event.value ?? event.decision))}</span>` +
+          `<span style="color:var(--muted)">${escapeHtml(event.question || '')}</span></li>`).join('')
+  }
+
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]))
+  }
+</script>
+</body>
+</html>
