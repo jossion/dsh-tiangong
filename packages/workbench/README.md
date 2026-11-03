@@ -16,7 +16,7 @@ intervention as possible. Every task stays bound to its own DSH session.
 - **Dispatch loop** — one ready work item at a time goes to a child agent, gets woken when it stalls, and its result is reported back with test evidence.
 - **Evidence-gated completion** — a work item is done only with a real exit code, a positive pass count and zero failures; otherwise it becomes a person's decision.
 - **Per-project delivery session** — each project gets a durable DSH session; the ledger records the binding, the model and the agent preset.
-- **Task cockpit** — team graph, task list, decisions, usage and delivery artifacts for every job, plus company modules (employees, organization, finance) built on local SQLite.
+- **Task cockpit** — team graph, task list, decisions, usage and delivery artifacts for every job.
 - **Automatic accounting** — token usage and cost per job, budgets, stall watchdog and round trip-breakers, with human gates on the exceptions.
 
 | Requirement upload | Team flow |

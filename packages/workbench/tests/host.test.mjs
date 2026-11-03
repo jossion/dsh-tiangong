@@ -5,10 +5,8 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, EMPLOYEES_PATH, FINANCE_PATH, JOB_CONFIG_PATH, ORG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, SERVICES_PATH, START_PATH, STATE_PATH, TASK_PATH, apply, pickScript} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, apply, pickScript} from '../index.js'
 import { createEventLog } from '../events.js'
-import { buildXlsx } from './fixtures.mjs'
-import { DatabaseSync } from 'node:sqlite'
 import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
 
 /**
@@ -135,17 +133,15 @@ test('the host mounts a read route and a write route, separately', async () => {
     apply(ctx, { dataDir })
 
     assert.deepEqual(routes.map(route => route.path).sort(),
-      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, EMPLOYEES_PATH, SERVICES_PATH, JOB_CONFIG_PATH, FINANCE_PATH, TASK_PATH, ORG_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH].sort())
+      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, JOB_CONFIG_PATH, TASK_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH].sort())
+    assert.equal(routes.every(route => !route.path.startsWith('/company')), true, 'company routes belong to @jos/company')
     assert.equal(STATE_PATH, '/workbench/state')
     assert.equal(START_PATH, '/workbench/start')
     assert.equal(PROJECTS_PATH, '/workbench/projects')
     assert.equal(CONTROL_PATH, '/workbench/control')
     assert.equal(DECIDE_PATH, '/workbench/decide')
     assert.equal(CONFIG_PATH, '/workbench/project-config')
-    assert.equal(EMPLOYEES_PATH, '/workbench/employees')
-    assert.equal(SERVICES_PATH, '/workbench/services')
     assert.equal(JOB_CONFIG_PATH, '/workbench/job-config')
-    assert.equal(ORG_PATH, '/workbench/organization')
     for (const route of routes) {
       assert.equal(route.kind, 'exact')
       assert.equal(typeof route.handler, 'function')
@@ -225,7 +221,7 @@ test('both routes disappear when the plugin is disposed', async () => {
   await withDataDir(async dataDir => {
     const { ctx, routes, disposers } = fakeContext()
     apply(ctx, { dataDir })
-    assert.equal(routes.length, 15)
+    assert.equal(routes.length, 11)
 
     const response = fakeResponse()
     await routes[0].handler({ method: 'GET' }, response)
@@ -569,92 +565,6 @@ test('a project can be pointed at its workspace, and preview refuses without one
   })
 })
 
-test('the panel can read and write the app database without the app server', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const employeesRoute = routes.find(route => route.path === EMPLOYEES_PATH)
-    const log = createEventLog(join(dataDir, 'events.jsonl'))
-    const workspace = join(dataDir, 'workspace')
-    mkdirSync(workspace, { recursive: true })
-    await log.append(projectEvent({ projectId: 'p1', title: '公司管理', workspace, event: 'config' }))
-
-    const call = async body => {
-      const response = fakeResponse()
-      await employeesRoute.handler(
-        body.method === 'GET'
-          ? { method: 'GET', url: `/workbench/employees?projectId=p1&search=${encodeURIComponent(body.search ?? '')}` }
-          : postRequest({ projectId: 'p1', ...body }),
-        response,
-      )
-      return { status: response.status, body: JSON.parse(response.body) }
-    }
-
-    const created = await call({ op: 'create', employee: { name: '刘寄和', email: 'Liu@Example.com', status: 'active' } })
-    assert.equal(created.status, 201)
-    assert.equal(created.body.data.email, 'Liu@Example.com')
-
-    const listed = await call({ method: 'GET', search: 'liu' })
-    assert.equal(listed.status, 200)
-    assert.equal(listed.body.total, 1, 'search is case-insensitive')
-    assert.equal(listed.body.data[0].name, '刘寄和')
-
-    const duplicate = await call({ op: 'create', employee: { name: 'dupe', email: 'liu@example.com' } })
-    assert.equal(duplicate.status, 409)
-    assert.equal(duplicate.body.error.code, 'EMAIL_CONFLICT')
-
-    const updated = await call({ op: 'update', id: created.body.data.id, patch: { status: 'inactive' } })
-    assert.equal(updated.status, 200)
-    assert.equal(updated.body.data.status, 'inactive')
-
-    const removed = await call({ op: 'delete', id: created.body.data.id })
-    assert.equal(removed.status, 200)
-    assert.deepEqual(removed.body.data, { id: created.body.data.id })
-    const again = await call({ op: 'delete', id: created.body.data.id })
-    assert.equal(again.status, 404)
-
-    const bad = await call({ op: 'create', employee: { name: '', email: 'nope' } })
-    assert.equal(bad.status, 400)
-    assert.equal(bad.body.error.code, 'VALIDATION_ERROR')
-  })
-})
-
-test('the panel can see a project\'s dependencies and is refused a phantom start', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const servicesRoute = routes.find(route => route.path === SERVICES_PATH)
-    const log = createEventLog(join(dataDir, 'events.jsonl'))
-    const workspace = join(dataDir, 'workspace')
-    mkdirSync(workspace, { recursive: true })
-    await log.append(projectEvent({ projectId: 'p1', title: '公司管理', workspace, event: 'config' }))
-
-    const listed = fakeResponse()
-    await servicesRoute.handler({ method: 'GET', url: '/workbench/services?projectId=p1' }, listed)
-    assert.equal(listed.status, 200)
-    const services = JSON.parse(listed.body).data
-    // No delivered app under this workspace: the database row is all there is.
-    assert.deepEqual(services.map(service => service.id), ['db'])
-    assert.equal(services[0].status, 'missing', 'no database file yet')
-
-    const bad = fakeResponse()
-    await servicesRoute.handler(postRequest({ projectId: 'p1', serviceId: 'db', action: 'start' }), bad)
-    assert.equal(bad.status, 400, 'a file dependency has no start action')
-
-    const noApp = fakeResponse()
-    await servicesRoute.handler(postRequest({ projectId: 'p1', serviceId: 'web', action: 'start' }), noApp)
-    assert.equal(noApp.status, 400)
-    assert.equal(JSON.parse(noApp.body).error.code, 'NO_APP')
-
-    // A project that still ships an app lists the server row again.
-    mkdirSync(join(workspace, 'web'), { recursive: true })
-    await writeFile(join(workspace, 'web', 'package.json'), '{"scripts":{"start":"next start"}}')
-    const withApp = fakeResponse()
-    await servicesRoute.handler({ method: 'GET', url: '/workbench/services?projectId=p1' }, withApp)
-    assert.deepEqual(JSON.parse(withApp.body).data.map(service => service.id), ['db', 'web'])
-  })
-})
-
 test('a job can be named after the requirement it runs', async () => {
   await withDataDir(async dataDir => {
     const { ctx, routes } = fakeContext()
@@ -706,88 +616,6 @@ test('a task stores its own workspace and conversation binding', async () => {
     assert.equal(job.sessionId, 'ses_1')
     assert.equal(job.workspace, workspace)
     assert.equal(job.workspaceId, 'ws_1', 'the DSH workspace id is stored beside the path')
-  })
-})
-
-test('the finance route reads a directory of bank CSVs and imports it once', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const financeRoute = routes.find(route => route.path === FINANCE_PATH)
-    assert.ok(financeRoute, 'the finance route is mounted')
-
-    const bankDir = join(dataDir, 'bank')
-    mkdirSync(bankDir, { recursive: true })
-    await writeFile(join(bankDir, '2026-01.csv'), [
-      '交易日期,交易摘要,对方户名,交易金额,收支,余额',
-      '2026-01-05,工资发放,某某公司,12000.00,收入,12000.00',
-      '2026-01-08,美团外卖,美团,-38.50,支出,11961.50',
-      '2026-02-01,房租,张房东,-5000.00,支出,6961.50',
-    ].join('\n'), 'utf8')
-
-    const refused = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-dir', dir: 'relative/path' }), refused)
-    assert.equal(refused.status, 400, 'a directory must be absolute')
-
-    const configured = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-dir', dir: bankDir }), configured)
-    assert.equal(configured.status, 200)
-    assert.equal(JSON.parse(configured.body).dir, bankDir)
-
-    const listed = fakeResponse()
-    await financeRoute.handler({ method: 'GET', url: '/workbench/finance?projectId=p1' }, listed)
-    const before = JSON.parse(listed.body)
-    assert.equal(before.dirExists, true)
-    assert.equal(before.files.length, 1, 'one CSV is offered, nothing else')
-    assert.equal(before.files[0].name, '2026-01.csv')
-    assert.equal(before.files[0].importedAt, null, 'not imported yet')
-    assert.equal(before.totalTransactions, 0)
-
-    const imported = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'import' }), imported)
-    assert.equal(imported.status, 200)
-    const result = JSON.parse(imported.body).result
-    assert.equal(result.imported.length, 1)
-    assert.equal(result.imported[0].rows, 3)
-    assert.equal(result.imported[0].encoding, 'utf-8')
-    assert.equal(result.imported[0].skipped, 0)
-
-    const january = fakeResponse()
-    await financeRoute.handler({ method: 'GET', url: '/workbench/finance?projectId=p1&from=2026-01-01&to=2026-01-31' }, january)
-    const after = JSON.parse(january.body)
-    assert.equal(after.files[0].importedAt !== null, true, 'the file shows as imported')
-    assert.equal(after.totalTransactions, 3, 'all rows are on the books')
-    assert.equal(after.summary.totals.income, 12000)
-    assert.equal(after.summary.totals.expense, 38.5)
-    assert.equal(after.summary.count, 2, 'the window really filters')
-    assert.equal(after.transactions.length, 2)
-    assert.ok(after.categories.includes('工资薪酬'), 'categories are derived for grouping')
-
-    const again = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'import' }), again)
-    const second = JSON.parse(again.body).result
-    assert.equal(second.imported.length, 0, 're-importing the same export is a no-op')
-    assert.equal(second.skipped[0].reason, 'already-imported')
-
-    const crossOrigin = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'import' }, { origin: 'https://evil.example' }), crossOrigin)
-    assert.equal(crossOrigin.status, 403, 'a cross-origin import is refused')
-
-    // The statements actually arrive as Excel; the same route has to take them.
-    await writeFile(join(bankDir, '流水-2026-03.xlsx'), buildXlsx())
-    const xlsxImport = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'import' }), xlsxImport)
-    const xlsxResult = JSON.parse(xlsxImport.body).result
-    assert.equal(xlsxResult.imported.length, 1)
-    assert.equal(xlsxResult.imported[0].format, 'xlsx')
-    assert.equal(xlsxResult.imported[0].sheet, '流水', 'the statement tab, not the cover tab')
-    assert.equal(xlsxResult.imported[0].rows, 3)
-
-    const listedXlsx = fakeResponse()
-    await financeRoute.handler({ method: 'GET', url: '/workbench/finance?projectId=p1' }, listedXlsx)
-    const withXlsx = JSON.parse(listedXlsx.body)
-    assert.equal(withXlsx.totalTransactions, 6, 'csv rows and xlsx rows share one ledger')
-    assert.ok(withXlsx.files.some(file => file.format === 'xlsx'), 'the folder listing names the format')
   })
 })
 
@@ -846,187 +674,6 @@ test('a card can be reported over HTTP, and done still needs green tests', async
     const crossOrigin = fakeResponse()
     await taskRoute.handler(postRequest({ taskId: 'j1:wi:card', event: 'progress' }, { origin: 'https://evil.example' }), crossOrigin)
     assert.equal(crossOrigin.status, 403, 'a cross-origin report is refused')
-  })
-})
-
-test('the finance page can read the app ledger database instead of CSV files', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const financeRoute = routes.find(route => route.path === FINANCE_PATH)
-
-    // The owner's database: same schema the company app uses.
-    const dbPath = join(dataDir, 'hzy.db')
-    const database = new DatabaseSync(dbPath)
-    database.exec('create table companies (id text primary key, name text)')
-    database.exec(`create table finance (
-      id text primary key, date text, type text, "catGroup" text, category text,
-      company text, dept text, person text, amount real, method text,
-      summary text, voucher text, note text)`)
-    database.prepare('insert into companies values (?, ?)').run('c1', '华之语')
-    const insert = database.prepare('insert into finance values (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    insert.run('f1', '2026-05-20', '支出', '人力成本', '社保公积金', 'c1', '', '', 4350, '对公转账', '委托收款', '', '交易后余额：543,375.70')
-    insert.run('f2', '2026-03-30', '收入', '其他收入', '税费退回', 'c1', '', '', 1615.24, '对公转账', '电子退库', '', '')
-    database.close()
-
-    const configured = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-source', source: 'sqlite', dbPath }), configured)
-    assert.equal(configured.status, 200)
-
-    const payload = fakeResponse()
-    await financeRoute.handler({ method: 'GET', url: '/workbench/finance?projectId=p1&preset=all' }, payload)
-    const body = JSON.parse(payload.body)
-    assert.equal(body.source, 'sqlite')
-    assert.equal(body.dbExists, true)
-    assert.equal(body.totalTransactions, 2)
-    assert.deepEqual(body.summary.totals, { income: 1615.24, expense: 4350, net: -2734.76 })
-    assert.ok(body.categories.includes('人力成本 · 社保公积金'))
-    const withBalance = body.transactions.find(row => row.id === 'db_f1')
-    assert.equal(withBalance.balance, 543375.7)
-    assert.equal(withBalance.company, '华之语')
-    const withoutBalance = body.transactions.find(row => row.id === 'db_f2')
-    assert.equal(withoutBalance.balance, null, 'rows without a balance say so')
-
-    const refused = fakeResponse()
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'import' }), refused)
-    assert.equal(refused.status, 400, 'a live source has nothing to import')
-    assert.equal(JSON.parse(refused.body).error.code, 'not-applicable')
-
-    const bad = fakeResponse()
-    // An allowed path that is not a finance database: rejected by the reader,
-    // not by the path fence.
-    await financeRoute.handler(postRequest({ projectId: 'p1', op: 'set-source', source: 'sqlite', dbPath: join(dataDir, 'nope.db') }), bad)
-    assert.equal(bad.status, 400)
-    assert.equal(JSON.parse(bad.body).error.code, 'bad-database')
-  })
-})
-
-test('the panel manages several companies with their own departments and job levels', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const orgRoute = routes.find(route => route.path === ORG_PATH)
-    const log = createEventLog(join(dataDir, 'events.jsonl'))
-    const workspace = join(dataDir, 'workspace')
-    mkdirSync(join(workspace, 'web', 'data'), { recursive: true })
-    await log.append(projectEvent({ projectId: 'p1', title: '公司管理', workspace, event: 'config' }))
-
-    const get = async (query = '') => {
-      const response = fakeResponse()
-      await orgRoute.handler({ method: 'GET', url: `/workbench/organization?projectId=p1${query}` }, response)
-      return { status: response.status, body: JSON.parse(response.body) }
-    }
-    const post = async body => {
-      const response = fakeResponse()
-      await orgRoute.handler(postRequest({ projectId: 'p1', ...body }), response)
-      return { status: response.status, body: JSON.parse(response.body) }
-    }
-
-    const empty = await get()
-    assert.deepEqual(empty.body.data.companies, [])
-    assert.equal(empty.body.data.company, null)
-
-    const a = await post({ op: 'company.create', name: '甲公司' })
-    const b = await post({ op: 'company.create', name: '乙公司' })
-    assert.equal(a.status, 201)
-    assert.equal((await get()).body.data.companies.length, 2)
-
-    const aRoot = await post({ op: 'department.create', companyId: a.body.data.company.id, name: '研发部' })
-    const bRoot = await post({ op: 'department.create', companyId: b.body.data.company.id, name: '财务部' })
-    assert.equal(aRoot.status, 201)
-    const crossParent = await post({
-      op: 'department.create',
-      companyId: b.body.data.company.id,
-      name: '串门',
-      parentDepartmentId: aRoot.body.data.department.id,
-    })
-    assert.equal(crossParent.status, 400, 'a parent must belong to the same company')
-
-    const levelA = await post({ op: 'joblevel.create', companyId: a.body.data.company.id, name: 'P7', rankOrder: 1 })
-    const levelB = await post({ op: 'joblevel.create', companyId: b.body.data.company.id, name: 'P5', rankOrder: 1 })
-    assert.equal(levelA.status, 201)
-
-    const scopedA = await get(`&companyId=${a.body.data.company.id}`)
-    const scopedB = await get(`&companyId=${b.body.data.company.id}`)
-    assert.deepEqual(scopedA.body.data.departments.map(item => item.name), ['研发部'])
-    assert.deepEqual(scopedB.body.data.departments.map(item => item.name), ['财务部'])
-    assert.deepEqual(scopedA.body.data.jobLevels.map(item => item.name), ['P7'])
-
-    const renamed = await post({ op: 'company.rename', id: a.body.data.company.id, name: '甲公司（更名）' })
-    assert.equal(renamed.status, 200)
-
-    const blockedCompany = await post({ op: 'company.delete', id: a.body.data.company.id })
-    assert.equal(blockedCompany.status, 409, 'a company with structure is not deleted silently')
-
-    const blockedDept = await post({ op: 'department.create', companyId: a.body.data.company.id, name: '后端', parentDepartmentId: aRoot.body.data.department.id })
-    const parentDelete = await post({ op: 'department.delete', id: aRoot.body.data.department.id })
-    assert.equal(parentDelete.status, 409, 'a department with children is not deleted silently')
-
-    await post({ op: 'department.delete', id: blockedDept.body.data.department.id })
-    await post({ op: 'department.delete', id: aRoot.body.data.department.id })
-    await post({ op: 'joblevel.delete', id: levelA.body.data.jobLevel.id })
-    const deleted = await post({ op: 'company.delete', id: a.body.data.company.id })
-    assert.equal(deleted.status, 200)
-    assert.equal((await get()).body.data.companies.length, 1, 'only 乙公司 remains')
-    void levelB
-  })
-})
-
-test('the organization route refuses a read without a project', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const orgRoute = routes.find(route => route.path === ORG_PATH)
-    const response = fakeResponse()
-    await orgRoute.handler({ method: 'GET', url: '/workbench/organization' }, response)
-    assert.equal(response.status, 404)
-    assert.match(response.body, /no such project/)
-  })
-})
-
-test('finance belongs to one project: two books never share rows', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const financeRoute = routes.find(route => route.path === FINANCE_PATH)
-    const bankDir = join(dataDir, 'bank')
-    mkdirSync(bankDir, { recursive: true })
-    await writeFile(join(bankDir, '2026-01.csv'), [
-      '交易日期,交易摘要,对方户名,交易金额,收支,余额',
-      '2026-01-05,工资发放,某某公司,12000.00,收入,12000.00',
-      '2026-01-08,美团外卖,美团,-38.50,支出,11961.50',
-    ].join('\n'), 'utf8')
-
-    const get = async projectId => {
-      const response = fakeResponse()
-      await financeRoute.handler({ method: 'GET', url: `/workbench/finance?projectId=${projectId}` }, response)
-      return JSON.parse(response.body)
-    }
-    const post = async body => {
-      const response = fakeResponse()
-      await financeRoute.handler(postRequest(body), response)
-      return { status: response.status, body: JSON.parse(response.body) }
-    }
-
-    await post({ projectId: 'prj_a', op: 'set-dir', dir: bankDir })
-    await post({ projectId: 'prj_b', op: 'set-dir', dir: bankDir })
-    await post({ projectId: 'prj_a', op: 'import' })
-
-    const a = await get('prj_a')
-    const b = await get('prj_b')
-    assert.equal(a.totalTransactions, 2, 'project A has its own rows')
-    assert.equal(a.files[0].importedAt !== null, true)
-    assert.equal(b.totalTransactions, 0, 'project B is untouched')
-    assert.equal(b.files[0].importedAt, null, 'A importing a file does not mark it imported for B')
-
-    await post({ projectId: 'prj_b', op: 'import' })
-    const bAfter = await get('prj_b')
-    assert.equal(bAfter.totalTransactions, 2, 'the same file can be imported into B independently')
-    assert.equal((await get('prj_a')).totalTransactions, 2, 'A did not grow from B\'s import')
-
-    const missing = fakeResponse()
-    await financeRoute.handler({ method: 'GET', url: '/workbench/finance' }, missing)
-    assert.equal(missing.status, 400, 'finance reads must name their project')
   })
 })
 
@@ -1090,65 +737,6 @@ test('the panel can walk the filesystem when a native dialog is unavailable', as
     const cross = fakeResponse()
     await browseRoute.handler(postRequest({ path: root }, { origin: 'https://evil.example' }), cross)
     assert.equal(cross.status, 403)
-  })
-})
-
-test('employees can be linked to a company and a department of that company', async () => {
-  await withDataDir(async dataDir => {
-    const { ctx, routes } = fakeContext()
-    apply(ctx, { dataDir })
-    const employeesRoute = routes.find(route => route.path === EMPLOYEES_PATH)
-    const orgRoute = routes.find(route => route.path === ORG_PATH)
-    const log = createEventLog(join(dataDir, 'events.jsonl'))
-    const workspace = join(dataDir, 'workspace')
-    mkdirSync(join(workspace, 'web', 'data'), { recursive: true })
-    await log.append(projectEvent({ projectId: 'p1', title: '公司管理', workspace, event: 'config' }))
-
-    const org = async body => {
-      const response = fakeResponse()
-      await orgRoute.handler(postRequest({ projectId: 'p1', ...body }), response)
-      return JSON.parse(response.body).data
-    }
-    const a = (await org({ op: 'company.create', name: '甲公司' })).company
-    const b = (await org({ op: 'company.create', name: '乙公司' })).company
-    const aDev = (await org({ op: 'department.create', companyId: a.id, name: '研发部' })).department
-    const bFin = (await org({ op: 'department.create', companyId: b.id, name: '财务部' })).department
-
-    const call = async body => {
-      const response = fakeResponse()
-      await employeesRoute.handler(
-        body.method === 'GET'
-          ? { method: 'GET', url: `/workbench/employees?projectId=p1&companyId=${body.companyId ?? ''}&search=` }
-          : postRequest({ projectId: 'p1', ...body }),
-        response,
-      )
-      return { status: response.status, body: JSON.parse(response.body) }
-    }
-
-    const created = await call({ op: 'create', employee: { name: '张三', email: 'z@x.com', companyId: a.id, departmentId: aDev.id } })
-    assert.equal(created.status, 201)
-    assert.equal(created.body.data.companyName, '甲公司')
-    assert.equal(created.body.data.departmentName, '研发部')
-    assert.equal(created.body.data.department, null, 'the text column still follows the link only when set')
-
-    const mismatched = await call({ op: 'create', employee: { name: '李四', email: 'l@x.com', companyId: b.id, departmentId: aDev.id } })
-    assert.equal(mismatched.status, 400, 'a department must belong to the chosen company')
-
-    const noCompany = await call({ op: 'create', employee: { name: '王五', email: 'w@x.com', companyId: 999 } })
-    assert.equal(noCompany.status, 400)
-
-    await call({ op: 'create', employee: { name: '赵六', email: 'zg@x.com', companyId: b.id, departmentId: bFin.id } })
-
-    const onlyA = await call({ method: 'GET', companyId: a.id })
-    assert.equal(onlyA.body.total, 1, 'the list can be scoped to one company')
-    assert.equal(onlyA.body.data[0].name, '张三')
-
-    const moved = await call({ op: 'update', id: created.body.data.id, patch: { departmentId: bFin.id } })
-    assert.equal(moved.status, 400, 'a bare department move across companies is refused')
-    const movedOk = await call({ op: 'update', id: created.body.data.id, patch: { companyId: b.id, departmentId: bFin.id } })
-    assert.equal(movedOk.status, 200)
-    assert.equal(movedOk.body.data.companyName, '乙公司')
-    assert.equal(movedOk.body.data.departmentName, '财务部')
   })
 })
 

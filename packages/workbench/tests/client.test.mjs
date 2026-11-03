@@ -40,7 +40,7 @@ const module = factory(name => {
   if (name !== 'react') throw new Error(`unexpected require: ${name}`)
   return stubReact()
 })
-const { EmployeeAdmin, OrgAdmin, FinanceTab, ProjectFinance, PathBrowser, ProjectCard, ProjectDetail, ProjectHome, TaskList, TeamGraphCard, FloatingPanel, Dialog, JobConversation, createSessionBridge, teamGraph } = module.__components
+const { ProjectCard, ProjectDetail, ProjectHome, TaskList, TeamGraphCard, FloatingPanel, Dialog, JobConversation, createSessionBridge, teamGraph } = module.__components
 
 const project = {
   id: 'prj_1',
@@ -413,29 +413,6 @@ test('a gate can be approved or rejected from the panel', () => {
   assert.ok(true)
 })
 
-test('the employee module is rendered by the panel, not embedded', () => {
-  const page = EmployeeAdmin({
-    t,
-    project: { ...project, workspace: '/tmp/app' },
-    onBack: () => {},
-    onOpenTasks: () => {},
-    onShowDeliverables: () => {},
-  })
-  let iframes = 0
-  const strings = []
-  walk(page, node => {
-    if (node.type === 'iframe') iframes += 1
-    const props = node.props || {}
-    if (typeof props.children === 'string') strings.push(props.children)
-    if (typeof props.placeholder === 'string') strings.push(props.placeholder)
-  })
-  assert.equal(iframes, 0, 'no iframe: the module is native')
-  assert.ok(strings.includes('employeeTitle'))
-  assert.ok(strings.includes('employeeSearch'))
-  assert.ok(strings.some(text => text.includes('employeeCreate')), 'there is a way to add an employee')
-})
-
-
 test('the plugin registers its sidebar entry and main surface', () => {
   const registered = []
   const optional = []
@@ -564,23 +541,6 @@ test('a busy lane is highlighted while the rest stays quiet', () => {
   })
   assert.ok(strings.some(text => text.includes('laneBusy')), 'the running lane is marked')
   assert.ok(strings.filter(text => text.includes('⋮⋮')).length >= 2, 'every lane keeps its grip')
-})
-
-test('the employee module shows the dependency status line', () => {
-  const page = EmployeeAdmin({
-    t,
-    project: { ...project, workspace: '/tmp/app' },
-    onBack: () => {},
-    onOpenTasks: () => {},
-    onShowDeliverables: () => {},
-  })
-  const strings = []
-  walk(page, node => {
-    const props = node.props || {}
-    if (typeof props.children === 'string') strings.push(props.children)
-  })
-  assert.ok(strings.includes('servicesLabel'), 'dependencies are a first-class strip')
-  assert.ok(strings.includes('serviceChecking'), 'and they say they are checking, not fake data')
 })
 
 test('the conversation bridge talks to the host, not to its own storage', async () => {
@@ -984,69 +944,6 @@ test('on a narrow surface the panel toggle opens a drawer instead of doing nothi
   assert.ok(drawers[0].overflowY === 'auto', 'and the drawer itself scrolls')
 })
 
-// ---- finance page -------------------------------------------------------
-
-const financePayload = {
-  dir: '/Users/owner/Documents/银行流水',
-  dirExists: true,
-  dirError: null,
-  files: [
-    { name: '2026-01.csv', size: 2048, mtime: '2026-02-01T00:00:00.000Z', importedAt: '2026-02-01T00:00:00.000Z', rows: 2 },
-    { name: '2026-02.csv', size: 1024, mtime: '2026-03-01T00:00:00.000Z', importedAt: null, rows: null },
-  ],
-  imports: [],
-  categories: ['工资薪酬', '餐饮'],
-  summary: {
-    count: 2,
-    totals: { income: 12000, expense: 38.5, net: 11961.5 },
-    byMonth: [{ month: '2026-01', income: 12000, expense: 38.5, count: 2 }],
-    byCategory: [
-      { category: '工资薪酬', income: 12000, expense: 0, count: 1, total: 12000 },
-      { category: '餐饮', income: 0, expense: 38.5, count: 1, total: 38.5 },
-    ],
-    topCounterparties: [],
-    range: { from: '2026-01-01', to: '2026-01-31' },
-  },
-  transactions: [
-    { id: 't1', date: '2026-01-05', description: '工资发放', counterparty: '某某公司', amount: 12000, direction: 'income', category: '工资薪酬' },
-    { id: 't2', date: '2026-01-08', description: '美团外卖', counterparty: '美团', amount: 38.5, direction: 'expense', category: '餐饮' },
-  ],
-  totalTransactions: 2,
-  filters: {},
-}
-
-test('the finance page turns one payload into totals, split and rows', () => {
-  const page = FinanceTab({ t, initialData: financePayload })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.includes('¥12,000.00'), 'income total is formatted, not raw')
-  assert.ok(strings.includes('¥38.50'), 'expense total is formatted')
-  assert.ok(strings.includes('¥11,961.50'), 'net is the third number')
-  assert.ok(strings.includes('2'), 'the count is shown')
-  assert.ok(strings.includes('26-01'), 'the month is on the chart')
-  assert.ok(strings.includes('工资薪酬'), 'categories are grouped')
-  assert.ok(strings.includes('工资发放') && strings.includes('美团外卖'), 'rows are listed')
-  assert.ok(strings.includes('+¥12,000.00') && strings.includes('−¥38.50'), 'direction sets the sign and colour')
-  assert.ok(strings.includes('2026-01.csv') && strings.includes('2026-02.csv'), 'the folder listing is visible')
-  assert.ok(strings.some(text => text.startsWith('financeImported')) && strings.includes('financePending'), 'imported and new files read differently')
-  // Filters are chips in the page, because the requirement asks for interaction.
-  assert.ok(strings.includes('financePeriodMonth') && strings.includes('financeDirection'), 'period and direction filters render')
-  let selects = 0
-  walk(page, node => { if (node.type === 'select') selects += 1 })
-  assert.equal(selects, 1, 'the category filter is a native select — one control, no custom menu')
-})
-
-test('the finance page says it is loading instead of showing zeros', () => {
-  const page = FinanceTab({ t })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.includes('loading'), 'no payload means loading, not "0 income"')
-})
-
 test('the panel is the projects board, not a tab bar with finance on it', () => {
   const api = factory(name => {
     if (name !== 'react') throw new Error(`unexpected require: ${name}`)
@@ -1060,94 +957,6 @@ test('the panel is the projects board, not a tab bar with finance on it', () => 
   assert.ok(strings.includes('天工'), 'the panel heading is still there')
   assert.ok(!strings.includes('财务管理'), 'finance is not a sibling tab of the projects board')
   assert.ok(!strings.includes('financeTab'), 'no placeholder for a removed tab')
-})
-
-test('finance opens inside the project, with a way back to the project app', () => {
-  const backed = []
-  const page = ProjectFinance({ t, project: { ...project, title: '公司管理' }, onBack: () => backed.push('back') })
-  const strings = []
-  let back = null
-  walk(page, node => {
-    const props = node.props || {}
-    if (typeof props.children === 'string') strings.push(props.children)
-    if (typeof props.onClick === 'function' && props.children === 'financeBack') back = props
-  })
-  assert.ok(strings.includes('公司管理'), 'the project name stays on screen')
-  assert.ok(back, 'a back chip returns to the project')
-  assert.equal(back.style.minHeight, '32px')
-  assert.ok(strings.includes('loading'), 'the finance module renders in place of the project app')
-  back.onClick()
-  assert.deepEqual(backed, ['back'])
-})
-
-test('the project header offers the finance module beside employee management', () => {
-  const opened = []
-  const page = EmployeeAdmin({
-    t,
-    project: { ...project, jobs: [jobOf('j1', '员工管理', 4, 4, { status: 'done' }), jobOf('j2', '财务管理', 17, 17, { status: 'done' })] },
-    onBack: () => {},
-    onOpenTasks: () => {},
-    onOpenFinance: () => opened.push('finance'),
-  })
-  const buttons = []
-  const strings = []
-  walk(page, node => {
-    const props = node.props || {}
-    if (typeof props.children === 'string') strings.push(props.children)
-    if (typeof props.onClick === 'function' && typeof props.children === 'string' && props.children.includes('financeTab')) buttons.push(props)
-  })
-  assert.ok(strings.some(text => text.includes('employeeModule')), 'employee is the active module')
-  assert.ok(buttons.length >= 1, 'finance is a clickable module chip')
-  buttons[0].onClick()
-  assert.deepEqual(opened, ['finance'])
-})
-
-test('the finance page can read the ledger database instead of a folder', () => {
-  const payload = {
-    ...financePayload,
-    source: 'sqlite',
-    dbPath: '/Users/owner/codes/app/web/data/hzy.db',
-    dbExists: true,
-    dbError: null,
-    dir: '',
-    dirExists: true,
-    files: [],
-    imports: [],
-    companies: ['华之语'],
-  }
-  const page = FinanceTab({ t, initialData: payload })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.some(text => text.includes('financeSourceSqlite')), 'the source is named')
-  assert.ok(strings.some(text => text.includes('/Users/owner/codes/app/web/data/hzy.db')), 'the database path is visible')
-  assert.ok(!strings.some(text => text.includes('financeImport')), 'a live database has nothing to import')
-  assert.ok(!strings.some(text => text.includes('financeFiles')), 'no folder listing for a database')
-  assert.ok(strings.includes('¥12,000.00'), 'the metrics still render from the same payload')
-})
-
-test('a database that cannot be read explains itself instead of showing zeros', () => {
-  const payload = {
-    ...financePayload,
-    source: 'sqlite',
-    dbPath: '/missing/hzy.db',
-    dbExists: false,
-    dbError: '数据库不存在：/missing/hzy.db',
-    dir: '',
-    files: [],
-    imports: [],
-    summary: { count: 0, totals: { income: 0, expense: 0, net: 0 }, byMonth: [], byCategory: [] },
-    transactions: [],
-    totalTransactions: 0,
-  }
-  const page = FinanceTab({ t, initialData: payload })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.some(text => text.includes('financeDbError')), 'the failure is named')
-  assert.ok(strings.some(text => text.includes('/missing/hzy.db')), 'with the path the owner typed')
 })
 
 test('a planned but unexecuted job reads as "ready to execute"', () => {
@@ -1195,112 +1004,6 @@ test('the cockpit can hand an unexecuted plan to the bound agent session', () =>
   assert.equal(sent[0][0], 'session-x')
   assert.ok(sent[0][1].includes('workbench_next_work'), 'the handoff prompt names the tools to use')
   assert.ok(sent[0][1].includes('j1'), 'and which job to execute')
-})
-
-test('the project page exposes employee and organization modules', () => {
-  const page = EmployeeAdmin({
-    t,
-    project: { ...project, jobs: [jobOf('j1', '员工管理', 4, 4, { status: 'done' })] },
-    onBack: () => {},
-    onOpenTasks: () => {},
-    onShowDeliverables: () => {},
-  })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.includes('employeeModule'), 'employee module tab')
-  assert.ok(strings.includes('orgModule'), 'organization module tab exists — this was the missing entry')
-})
-
-test('the organization module renders company, department and job-level sections', () => {
-  const page = OrgAdmin({
-    t,
-    project,
-    initialData: {
-      companies: [{ id: 1, name: '甲公司' }, { id: 2, name: '乙公司' }],
-      company: { id: 1, name: '甲公司' },
-      departments: [{ id: 10, companyId: 1, name: '研发部', parentDepartmentId: null, sortOrder: 1 }],
-      jobLevels: [{ id: 20, companyId: 1, name: 'P7', rankOrder: 1 }],
-    },
-  })
-  const strings = []
-  walk(page, node => {
-    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
-  })
-  assert.ok(strings.includes('orgCompanies'))
-  assert.ok(strings.some(text => text.includes('orgCreateCompany')), 'can create a company')
-  assert.ok(strings.includes('orgDeleteCompany'), 'can delete a company')
-  assert.ok(strings.some(text => text.includes('orgDepartments')), 'departments section is scoped to a company')
-  assert.ok(strings.some(text => text.includes('orgJobLevels')), 'job levels section is scoped to a company')
-  assert.ok(strings.some(text => text.includes('orgCreateDepartment')), 'can create a department')
-  assert.ok(strings.some(text => text.includes('orgCreateLevel')), 'can create a job level')
-  const deletable = []
-  walk(page, node => { const props = node.props || {}; if (props.title === 'orgDelete' || props.children === '✕') deletable.push(props) })
-  assert.ok(deletable.length >= 2, 'department and job-level rows are deletable')
-})
-
-test('the organization module asks for its own project (last bug: request without projectId → 404)', () => {
-  const urls = []
-  globalThis.fetch = async url => {
-    urls.push(String(url))
-    return { ok: true, json: async () => ({ data: { company: { id: null, name: '' }, departments: [], jobLevels: [] } }) }
-  }
-  const react = stubReact()
-  react.useEffect = fn => { fn() }
-  const api = factory(name => {
-    if (name !== 'react') throw new Error(`unexpected require: ${name}`)
-    return react
-  })
-  api.__components.OrgAdmin({ t, project: { id: 'prj_mvyh9kvx_9ys0ee', title: '公司管理' } })
-  assert.equal(urls.length >= 1, true, 'mounting the module loads it')
-  assert.ok(urls[0].startsWith('/workbench/organization?projectId=prj_mvyh9kvx_9ys0ee'), `got ${urls[0]}`)
-  delete globalThis.fetch
-})
-
-test('the finance module reads the ledger of its own project', () => {
-  const urls = []
-  globalThis.fetch = async url => {
-    urls.push(String(url))
-    return { ok: true, json: async () => ({ source: 'files', dir: '', dirExists: true, files: [], imports: [], categories: [], companies: [], summary: { totals: { income: 0, expense: 0, net: 0 }, count: 0, byCategory: [], byMonth: [] }, transactions: [], totalTransactions: 0, filters: {} }) }
-  }
-  const react = stubReact()
-  react.useEffect = fn => { fn() }
-  const api = factory(name => {
-    if (name !== 'react') throw new Error(`unexpected require: ${name}`)
-    return react
-  })
-  api.__components.FinanceTab({ t, projectId: 'prj_mvyh9kvx_9ys0ee' })
-  assert.ok(urls.length >= 1, 'the module loads on mount')
-  assert.ok(urls[0].includes('projectId=prj_mvyh9kvx_9ys0ee'), `got ${urls[0]}`)
-  delete globalThis.fetch
-})
-
-test('the finance source editor opens the in-panel browser instead of asking for a typed path', () => {
-  assert.ok(code.includes('/workbench/browse-path'), 'the editor walks the filesystem itself')
-  assert.ok(code.includes('setBrowserMode'), 'the button opens the browser dialog')
-  assert.ok(!/const choosePath = useCallback\(async/.test(code), 'the button never waits on a native dialog first')
-})
-
-test('the path browser renders its listing without a native dialog', () => {
-  const page = PathBrowser({ t, mode: 'directory', onPick: () => {}, onClose: () => {} })
-  const strings = []
-  walk(page, node => {
-    const props = node.props || {}
-    if (typeof props.children === 'string') strings.push(props.children)
-    if (typeof props.onClick === 'function' && props.children === 'pickChooseFolder') strings.push('pick_chosen')
-  })
-  assert.ok(strings.includes('pickTitle'))
-  assert.ok(strings.includes('pickUp'))
-  assert.ok(strings.includes('pick_chosen'), 'directory mode can accept the current folder')
-})
-
-test('the employee form links a company and shows only that company departments', () => {
-  assert.ok(code.includes("value: form.values.companyId"), 'the form has a company select')
-  assert.ok(code.includes("formDepartments.map"), 'the department select is filled from the chosen company')
-  assert.ok(code.includes("loadOrg(next)"), 'changing company reloads its departments')
-  assert.ok(code.includes("setValue('departmentId', '')"), 'changing company clears the stale department')
-  assert.ok(!/key: 'department'/.test(code), 'no second, free-text department field')
 })
 
 test('the task dialog can attach a requirement document, and only offers it when supported', () => {

@@ -1,0 +1,9 @@
+# @jos/company — company modules panel for the Tiangong workbench.
+# The workspace is the delivered company project the panel reads its SQLite
+# databases from; it is set by the profile row (see README).
+- insert:
+    - id: company
+      name: '@jos/company'
+      config:
+        workspace: ''
+        financeDb: ''

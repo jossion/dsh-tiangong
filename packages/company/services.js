@@ -1,5 +1,5 @@
 /**
- * Services a project depends on, and their lifecycle.
+ * Services the delivered company app depends on, and their lifecycle.
  *
  * Two kinds today:
  *   db   — the app's SQLite file. Always local; status is "file ready" or not.
@@ -8,12 +8,23 @@
  *
  * Managed children are tracked here so a restart cannot leave an orphan
  * server on a port: `disposeAll()` runs when the plugin is disposed.
+ *
+ * The port is a parameter, not a constant: the plugin passes its configured
+ * `appPort` on every call, and `WORKBENCH_APP_PORT` (then 4321) stays the
+ * fallback for callers that do not care.
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-const DEFAULT_PORT = Number(process.env.WORKBENCH_APP_PORT ?? 4321)
+const ENV_PORT = Number(process.env.WORKBENCH_APP_PORT ?? 4321)
+const DEFAULT_PORT = Number.isInteger(ENV_PORT) && ENV_PORT > 0 ? ENV_PORT : 4321
+
+/** Accept `{ port }` from the plugin; anything unusable falls back. */
+export function resolvePort(options = {}) {
+  const port = Number(options?.port ?? DEFAULT_PORT)
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : DEFAULT_PORT
+}
 
 /** projectId → { child, port, url, startedAt, output } */
 const managed = new Map()
@@ -40,8 +51,8 @@ function tail(entry) {
   return entry.output.slice(-12).join('\n')
 }
 
-export async function listServices(workspace) {
-  const port = DEFAULT_PORT
+export async function listServices(workspace, options = {}) {
+  const port = resolvePort(options)
   const url = `http://127.0.0.1:${port}`
   const running = managed.get(workspace)
   const reachable = await probe(url)
@@ -74,13 +85,13 @@ export async function listServices(workspace) {
 }
 
 /** Start the app server if it is not already answering. Idempotent. */
-export async function startService(workspace, projectId, serviceId) {
+export async function startService(workspace, projectId, serviceId, options = {}) {
   if (serviceId !== 'web') throw new ServiceError('BAD_REQUEST', `service ${serviceId} cannot be started`)
   const dir = appDir(workspace)
   if (!existsSync(join(dir, 'package.json'))) {
     throw new ServiceError('NO_APP', `${dir} has no package.json`)
   }
-  const port = DEFAULT_PORT
+  const port = resolvePort(options)
   const url = `http://127.0.0.1:${port}`
   if (await probe(url)) return { status: 'running', detail: url }
 

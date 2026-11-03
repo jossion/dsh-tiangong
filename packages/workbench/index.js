@@ -1,11 +1,11 @@
 /**
  * Host half of the Workbench bundle.
  *
- * Two domains:
- *  - operations: staff directory and finance ledger, persisted as local JSON
- *  - delivery:   requirement-driven software planning runs
+ * One domain after the split: requirement-driven software delivery. The
+ * company modules (staff directory, organization, finance, the delivered app
+ * server) live in @jos/company and are mounted by it under `/company/*`.
  *
- * Plus the decision log both of them write into: every judgement the delivery
+ * The decision log is still this plugin's: every judgement the delivery
  * workflow makes becomes one line in `events.jsonl`, and the panel is a
  * projection of that file. The panel reads it over one read-only host route,
  * so the browser never keeps its own copy of the data.
@@ -17,35 +17,19 @@
 import { existsSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog, summarize } from './events.js'
 import { artifactEvent, buildBoard, foldTasks, jobEvent, projectEvent, requirementEvent, taskEvent } from './projects.js'
-import { AppDbError, createEmployee, deleteEmployee, listEmployees, updateEmployee } from './appdb.js'
-import {
-  OrgError, createCompany, createDepartment, createJobLevel, deleteCompany, deleteDepartment, deleteJobLevel,
-  listCompanies, listDepartments, listJobLevels, renameCompany, updateDepartment, updateJobLevel,
-} from './orgdb.js'
-import { disposeAll, listServices, ServiceError, startService, stopService } from './services.js'
 import { readyWork, reportEvents } from './executor.js'
 import { PlanError, assertPlan, buildCardId, planEvents } from './planner.js'
 import { RequirementError, assertRequirement, storeRequirement } from './requirements.js'
 import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills } from './skillfind.js'
 import { createSessionBridge } from './sessions.js'
 import { createDispatcher } from './dispatch.js'
-import { readFinanceLedger } from './ledgerdb.js'
-import {
-  DEFAULT_FINANCE_DIR,
-  fileFingerprint,
-  filterTransactions,
-  resolveRange,
-  statementSheets,
-  summarizeFinance,
-  toTransactions,
-} from './finance.js'
 
 export const inject = ['llm', 'tools']
 
@@ -154,15 +138,10 @@ export const PROJECTS_PATH = '/workbench/projects'
 export const CONTROL_PATH = '/workbench/control'
 export const DECIDE_PATH = '/workbench/decide'
 export const CONFIG_PATH = '/workbench/project-config'
-export const EMPLOYEES_PATH = '/workbench/employees'
-export const SERVICES_PATH = '/workbench/services'
 export const JOB_CONFIG_PATH = '/workbench/job-config'
 /** Requirements: one route, POST only. A requirement opens a job. */
 export const REQUIREMENTS_PATH = '/workbench/requirements'
 
-/** Finance: one route, read on GET, import/configure on POST. */
-export const FINANCE_PATH = '/workbench/finance'
-export const ORG_PATH = '/workbench/organization'
 export const PICK_PATH = '/workbench/pick-path'
 export const BROWSE_PATH = '/workbench/browse-path'
 /**
@@ -262,6 +241,14 @@ function allowedRoots(ctx, config) {
     /* no registry: home and the data dir are still allowed */
   }
   return roots.filter(root => typeof root === 'string' && root !== '').map(root => resolve(root))
+}
+
+/** `~` is only shorthand a person typed; the filesystem wants a real path. */
+function expandHome(value) {
+  const text = String(value ?? '').trim()
+  if (text === '' || text === '~') return text === '~' ? homedir() : ''
+  if (text.startsWith('~/')) return join(homedir(), text.slice(2))
+  return text
 }
 
 /** Is `target` inside one of the allowed roots (or equal to one)? */
@@ -633,84 +620,6 @@ export function apply(ctx, row) {
     },
   }
 
-  const workspaceOf = async projectId => {
-    const board = buildBoard(await events.all())
-    return board.projects.find(project => project.id === projectId)?.workspace ?? null
-  }
-
-  const dbError = (error, response, fallback = 500) => {
-    if (error instanceof AppDbError) {
-      const status = error.code === 'NOT_FOUND' ? 404 : error.code === 'EMAIL_CONFLICT' ? 409 : 400
-      sendJson(response, status, { error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) } })
-      return
-    }
-    sendJson(response, fallback, { error: { code: 'INTERNAL_ERROR', message: String(error?.message ?? error) } })
-  }
-
-  /**
-   * The panel's own employee API, backed by the delivered app's SQLite file.
-   * The point is that the panel does not need the app's HTTP server to be up:
-   * one workbench, one data source, no iframe.
-   */
-  const employeesRoute = {
-    kind: 'exact',
-    path: EMPLOYEES_PATH,
-    handler: async (request, response) => {
-      if (!isSameOrigin(request)) {
-        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
-        return
-      }
-      const url = new URL(request.url ?? '/', 'http://localhost')
-      try {
-        if (request.method === 'GET') {
-          const projectId = url.searchParams.get('projectId') ?? ''
-          const workspace = await workspaceOf(projectId)
-          if (workspace === null) {
-            sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-            return
-          }
-          const result = listEmployees(workspace, {
-            search: url.searchParams.get('search') ?? '',
-            status: url.searchParams.get('status') ?? '',
-            companyId: url.searchParams.get('companyId') ?? '',
-            limit: url.searchParams.get('limit') ?? 50,
-            offset: url.searchParams.get('offset') ?? 0,
-          })
-          sendJson(response, 200, { data: result.rows, total: result.total, limit: result.limit, offset: result.offset })
-          return
-        }
-        if (request.method !== 'POST') {
-          sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-          return
-        }
-        let body = {}
-        body = await readJsonBody(request)
-        const workspace = await workspaceOf(String(body?.projectId ?? ''))
-        if (workspace === null) {
-          sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-          return
-        }
-        const op = String(body?.op ?? 'create')
-        if (op === 'create') {
-          sendJson(response, 201, { data: createEmployee(workspace, body?.employee ?? {}) })
-          return
-        }
-        if (op === 'update') {
-          sendJson(response, 200, { data: updateEmployee(workspace, body?.id, body?.patch ?? {}) })
-          return
-        }
-        if (op === 'delete') {
-          deleteEmployee(workspace, body?.id)
-          sendJson(response, 200, { data: { id: Number(body?.id) } })
-          return
-        }
-        sendJson(response, 400, { error: { code: 'BAD_REQUEST', message: `unknown op ${op}` } })
-      } catch (error) {
-        dbError(error, response)
-      }
-    },
-  }
-
   /** Name a job (planning run): the requirement, not the project container. */
   const jobConfigRoute = {
     kind: 'exact',
@@ -772,394 +681,6 @@ export function apply(ctx, row) {
       }
       await events.append(jobEvent({ projectId, jobId, ...patch, event: 'config', ts: new Date().toISOString() }))
       sendJson(response, 200, { projectId, jobId, ...patch })
-    },
-  }
-
-  /** Dependencies of a project: what it needs, whether it is up, and controls. */
-  const servicesRoute = {
-    kind: 'exact',
-    path: SERVICES_PATH,
-    handler: async (request, response) => {
-      if (!isSameOrigin(request)) {
-        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
-        return
-      }
-      const url = new URL(request.url ?? '/', 'http://localhost')
-      try {
-        if (request.method === 'GET') {
-          const workspace = await workspaceOf(url.searchParams.get('projectId') ?? '')
-          if (workspace === null) {
-            sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-            return
-          }
-          sendJson(response, 200, { data: await listServices(workspace) })
-          return
-        }
-        if (request.method !== 'POST') {
-          sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-          return
-        }
-        const body = await readJsonBody(request)
-        const workspace = await workspaceOf(String(body?.projectId ?? ''))
-        if (workspace === null) {
-          sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-          return
-        }
-        const serviceId = String(body?.serviceId ?? '')
-        const action = String(body?.action ?? '')
-        if (action === 'start') {
-          if (!pathAllowed(workspace, allowedRoots(ctx, config))) {
-            sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${workspace}` } })
-            return
-          }
-          const result = await startService(workspace, String(body?.projectId ?? ''), serviceId)
-          sendJson(response, 200, { data: result })
-          return
-        }
-        if (action === 'stop') {
-          const result = await stopService(workspace)
-          sendJson(response, 200, { data: result })
-          return
-        }
-        sendJson(response, 400, { error: { code: 'BAD_REQUEST', message: `unknown action ${action}` } })
-      } catch (error) {
-        if (error instanceof ServiceError) {
-          const status = error.code === 'NO_APP' || error.code === 'BAD_REQUEST' ? 400 : 502
-          sendJson(response, status, { error: { code: error.code, message: error.message } })
-          return
-        }
-        sendJson(response, 500, { error: { code: 'INTERNAL_ERROR', message: String(error?.message ?? error) } })
-      }
-    },
-  }
-
-  // ---------------------------------------------------------------------------
-  // Finance: bank-statement CSV -> transactions -> one dashboard payload.
-  //
-  // The host owns the filesystem read. A browser cannot list a directory, and
-  // "读取指定目录里的 CSV" is the requirement verbatim, so the panel names a
-  // directory and the host answers with the files it may import. Nothing here
-  // touches the ledger: statement rows are their own collection, and the read
-  // route stays read-only while POST carries the two writes (set-dir/import).
-  // ---------------------------------------------------------------------------
-  const FINANCE_CONFIG_ID = 'finance'
-
-  const expandHome = value => {
-    const text = String(value ?? '').trim()
-    if (text === '' || text === '~') return text === '~' ? homedir() : ''
-    if (text.startsWith('~/')) return join(homedir(), text.slice(2))
-    return text
-  }
-
-  const financeConfigId = projectId => (projectId ? `${FINANCE_CONFIG_ID}:${projectId}` : FINANCE_CONFIG_ID)
-  async function financeConfig(projectId = '') {
-    const rows = await store.list('financeConfig')
-    const row = rows.find(item => item.id === financeConfigId(projectId))
-    return {
-      // Two sources: a folder of exported statements, or the app's own ledger
-      // database (read-only). `files` is the default so an old config keeps
-      // working without a migration.
-      source: row?.source === 'sqlite' ? 'sqlite' : 'files',
-      dir: expandHome(row?.dir ?? '') || DEFAULT_FINANCE_DIR,
-      dbPath: expandHome(row?.dbPath ?? ''),
-    }
-  }
-
-  async function saveFinanceConfig(projectId, patch) {
-    const id = financeConfigId(projectId)
-    const rows = await store.list('financeConfig')
-    const row = rows.find(item => item.id === id)
-    if (row === undefined) return store.add('financeConfig', { id, projectId, ...patch })
-    return store.update('financeConfig', id, patch)
-  }
-
-  /**
-   * The CSV files in the configured directory.
-   *
-   * "Already imported" is matched on name+size instead of hashing every file on
-   * every panel poll: a 10 MB statement should not be read to answer "is there
-   * anything new". The import itself still fingerprints the bytes, so the
-   * double-import guard is exact where it matters.
-   */
-  async function financeFiles(dir, projectId = '') {
-    const imports = (await store.list('financeImports')).filter(item => (item.projectId ?? '') === projectId)
-    const importedByKey = new Map(imports.map(item => [`${item.file}:${item.size}`, item]))
-    try {
-      const entries = await readdir(dir, { withFileTypes: true })
-      const files = []
-      for (const entry of entries) {
-        if (entry.isFile() === false || /\.(csv|xlsx|xlsm|xls)$/i.test(entry.name) === false) continue
-        const info = await stat(join(dir, entry.name))
-        const imported = importedByKey.get(`${entry.name}:${info.size}`)
-        files.push({
-          name: entry.name,
-          format: entry.name.split('.').pop().toLowerCase(),
-          size: info.size,
-          mtime: info.mtime.toISOString(),
-          importedAt: imported?.importedAt ?? null,
-          rows: imported?.rows ?? null,
-        })
-      }
-      files.sort((a, b) => String(b.mtime).localeCompare(String(a.mtime)) || a.name.localeCompare(b.name))
-      return { exists: true, files, error: null }
-    } catch (error) {
-      return { exists: false, files: [], error: String(error?.message ?? error) }
-    }
-  }
-
-  /** Parse the selected files, refuse rows already on the books, write once. */
-  async function financeImport(dir, requested, projectId = '') {
-    const listing = await financeFiles(dir, projectId)
-    if (listing.exists === false) {
-      return { imported: [], skipped: [], errors: [{ file: '*', message: listing.error }] }
-    }
-    const wanted = Array.isArray(requested) && requested.length > 0 ? new Set(requested) : null
-    const existingImports = (await store.list('financeImports')).filter(item => (item.projectId ?? '') === projectId)
-    const importedFingerprints = new Set(existingImports.map(item => item.fingerprint))
-    const existing = (await store.list('financeTransactions')).filter(item => (item.projectId ?? '') === projectId)
-    const seen = new Set(existing.map(item => item.hash))
-    const imported = []
-    const skipped = []
-    const errors = []
-    for (const file of listing.files) {
-      if (wanted !== null && wanted.has(file.name) === false) continue
-      try {
-        const buffer = await readFile(join(dir, file.name))
-        const fingerprint = fileFingerprint(buffer)
-        if (importedFingerprints.has(fingerprint)) {
-          skipped.push({ file: file.name, reason: 'already-imported', rows: file.rows ?? 0 })
-          continue
-        }
-        const importId = `fin_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-        // A workbook may open on a cover tab; take the first sheet whose header
-        // maps, not blindly the first sheet.
-        const sheets = statementSheets(buffer, file.name)
-        let parsed = null
-        let sheetName = ''
-        for (const sheet of sheets) {
-          const candidate = toTransactions(sheet.rows, { file: file.name, importId })
-          if (candidate.headerIndex >= 0) {
-            parsed = candidate
-            sheetName = sheet.name
-            break
-          }
-        }
-        if (parsed === null) {
-          errors.push({ file: file.name, message: '找不到表头：至少需要一列日期和一列金额' })
-          continue
-        }
-        const fresh = []
-        for (const transaction of parsed.transactions) {
-          if (seen.has(transaction.hash)) continue
-          seen.add(transaction.hash)
-          fresh.push({ ...transaction, id: `${importId}_${transaction.line}`, projectId })
-        }
-        await store.addMany('financeTransactions', fresh)
-        const record = {
-          id: importId,
-          projectId,
-          file: file.name,
-          dir,
-          fingerprint,
-          encoding: sheets[0]?.encoding ?? 'utf-8',
-          sheet: sheetName,
-          format: file.name.split('.').pop().toLowerCase(),
-          size: file.size,
-          rows: fresh.length,
-          skipped: parsed.skipped,
-          duplicateRows: parsed.transactions.length - fresh.length,
-          importedAt: new Date().toISOString(),
-        }
-        await store.add('financeImports', record)
-        importedFingerprints.add(fingerprint)
-        imported.push(record)
-      } catch (error) {
-        errors.push({ file: file.name, message: String(error?.message ?? error) })
-      }
-    }
-    return { imported, skipped, errors }
-  }
-
-  /** One payload feeds the whole finance page: source, files, aggregates, rows. */
-  async function financePayload(url, projectId = '') {
-    const config = await financeConfig(projectId)
-    // `preset` is resolved here, not in the browser: one definition of "本月"
-    // (the local calendar) instead of one per client.
-    const from = url.searchParams.get('from') ?? ''
-    const to = url.searchParams.get('to') ?? ''
-    const preset = url.searchParams.get('preset') ?? ''
-    const range = from !== '' || to !== '' ? { from, to } : resolveRange(preset)
-    const filters = {
-      from: range.from,
-      to: range.to,
-      category: url.searchParams.get('category') ?? '',
-      direction: url.searchParams.get('direction') ?? '',
-      q: url.searchParams.get('q') ?? '',
-      preset,
-    }
-
-    if (config.source === 'sqlite') {
-      // The ledger database is the source of truth: read it per request instead
-      // of copying rows, so an edit in the app shows up here on the next poll.
-      try {
-        const ledger = await readFinanceLedger(config.dbPath)
-        return {
-          source: 'sqlite',
-          dbPath: config.dbPath,
-          dbExists: true,
-          dbError: null,
-          dir: config.dir,
-          dirExists: true,
-          files: [],
-          imports: [],
-          categories: ledger.categories,
-          companies: ledger.companies,
-          summary: summarizeFinance(ledger.transactions, filters),
-          transactions: filterTransactions(ledger.transactions, filters)
-            .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.id).localeCompare(String(a.id)))
-            .slice(0, 200),
-          totalTransactions: ledger.transactions.length,
-          range: ledger.range,
-          filters,
-        }
-      } catch (error) {
-        return {
-          source: 'sqlite',
-          dbPath: config.dbPath,
-          dbExists: false,
-          dbError: String(error?.message ?? error),
-          dir: config.dir,
-          dirExists: true,
-          files: [],
-          imports: [],
-          categories: [],
-          companies: [],
-          summary: summarizeFinance([], filters),
-          transactions: [],
-          totalTransactions: 0,
-          filters,
-        }
-      }
-    }
-
-    const listing = await financeFiles(config.dir, projectId)
-    const all = (await store.list('financeTransactions')).filter(item => (item.projectId ?? '') === projectId)
-    const summary = summarizeFinance(all, filters)
-    const transactions = filterTransactions(all, filters)
-      .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.line).localeCompare(String(a.line)))
-      .slice(0, 200)
-    const imports = (await store.list('financeImports')).filter(item => (item.projectId ?? '') === projectId)
-    return {
-      source: 'files',
-      dir: config.dir,
-      dbPath: config.dbPath,
-      dirExists: listing.exists,
-      dirError: listing.error,
-      files: listing.files,
-      imports: imports.slice().reverse(),
-      categories: [...new Set(all.map(item => item.category))].filter(Boolean).sort(),
-      summary,
-      transactions,
-      totalTransactions: all.length,
-      filters,
-    }
-  }
-
-  const financeRoute = {
-    kind: 'exact',
-    path: FINANCE_PATH,
-    handler: async (request, response) => {
-      if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'POST') {
-        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-        return
-      }
-      if (request.method === 'POST' && !isSameOrigin(request)) {
-        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
-        return
-      }
-      const url = new URL(request.url ?? '/', 'http://localhost')
-      let projectId = url.searchParams.get('projectId') ?? ''
-      try {
-        if (request.method === 'GET' || request.method === 'HEAD') {
-          if (projectId === '') {
-            sendJson(response, 400, { error: { code: 'bad-request', message: 'projectId is required — finance belongs to a project' } })
-            return
-          }
-          sendJson(response, 200, await financePayload(url, projectId))
-          return
-        }
-        const body = await readJsonBody(request)
-        projectId = projectId || String(body?.projectId ?? '')
-        if (projectId === '') {
-          sendJson(response, 400, { error: { code: 'bad-request', message: 'projectId is required — finance belongs to a project' } })
-          return
-        }
-        const op = String(body?.op ?? '').trim()
-        const source = body?.source === 'sqlite' ? 'sqlite' : 'files'
-        if (op === 'set-source' || op === 'set-dir') {
-          // `set-dir` stays as the folder-only alias an older panel may send.
-          const nextSource = op === 'set-dir' ? 'files' : source
-          if (nextSource === 'sqlite') {
-            const dbPath = expandHome(body?.dbPath)
-            if (dbPath === '' || !isAbsolute(dbPath)) {
-              sendJson(response, 400, { error: { code: 'bad-request', message: 'dbPath must be an absolute path' } })
-              return
-            }
-            if (!pathAllowed(dbPath, allowedRoots(ctx, config))) {
-              sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${dbPath}` } })
-              return
-            }
-            try {
-              // Validate by reading, not by inspecting: a valid SQLite file
-              // without a `finance` table is still the wrong database.
-              await readFinanceLedger(dbPath)
-            } catch (error) {
-              sendJson(response, 400, { error: { code: 'bad-database', message: String(error?.message ?? error) } })
-              return
-            }
-            await saveFinanceConfig(projectId, { source: 'sqlite', dbPath })
-            sendJson(response, 200, { ok: true, source: 'sqlite', dbPath })
-            return
-          }
-          const dir = expandHome(body?.dir)
-          if (dir === '' || !isAbsolute(dir)) {
-            sendJson(response, 400, { error: { code: 'bad-request', message: 'dir must be an absolute path' } })
-            return
-          }
-          if (!pathAllowed(dir, allowedRoots(ctx, config))) {
-            sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${dir}` } })
-            return
-          }
-          try {
-            const info = await stat(dir)
-            if (!info.isDirectory()) throw new Error('not a directory')
-          } catch (error) {
-            sendJson(response, 400, {
-              error: { code: 'bad-directory', message: `${dir}: ${String(error?.message ?? error)}` },
-            })
-            return
-          }
-          await saveFinanceConfig(projectId, { source: 'files', dir })
-          sendJson(response, 200, { ok: true, source: 'files', dir })
-          return
-        }
-        if (op === 'import') {
-          const config = await financeConfig(projectId)
-          if (config.source === 'sqlite') {
-            sendJson(response, 400, {
-              error: { code: 'not-applicable', message: 'SQLite 数据源是实时读取的，不需要导入' },
-            })
-            return
-          }
-          sendJson(response, 200, { ok: true, result: await financeImport(config.dir, body?.files, projectId) })
-          return
-        }
-        sendJson(response, 400, { error: { code: 'bad-request', message: `unknown op ${op}` } })
-      } catch (error) {
-        sendJson(response, 500, {
-          error: { code: 'finance-unavailable', message: String(error?.message ?? error) },
-        })
-      }
     },
   }
 
@@ -1276,97 +797,6 @@ export function apply(ctx, row) {
     child.on('error', reject)
     child.on('close', code => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }))
   })
-
-  const orgRoute = {
-    kind: 'exact',
-    path: ORG_PATH,
-    handler: async (request, response) => {
-      if (!isSameOrigin(request)) {
-        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
-        return
-      }
-      const url = new URL(request.url ?? '/', 'http://localhost')
-      const fail = error => {
-        if (error instanceof OrgError) {
-          const status = error.code === 'NOT_FOUND' ? 404 : error.code === 'HAS_CHILDREN' ? 409 : 400
-          sendJson(response, status, { error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) } })
-          return
-        }
-        sendJson(response, 500, { error: { code: 'INTERNAL_ERROR', message: String(error?.message ?? error) } })
-      }
-      try {
-        if (request.method === 'GET') {
-          const workspace = await workspaceOf(url.searchParams.get('projectId') ?? '')
-          if (workspace === null) {
-            sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-            return
-          }
-          const companies = listCompanies(workspace)
-          const requested = Number(url.searchParams.get('companyId') ?? 0)
-          const company = companies.find(item => item.id === requested) ?? companies[0] ?? null
-          sendJson(response, 200, {
-            data: {
-              companies,
-              company,
-              departments: company === null ? [] : listDepartments(workspace, company.id),
-              jobLevels: company === null ? [] : listJobLevels(workspace, company.id),
-            },
-          })
-          return
-        }
-        if (request.method !== 'POST') {
-          sendJson(response, 405, { error: { code: 'method-not-allowed' } })
-          return
-        }
-        const body = await readJsonBody(request)
-        const workspace = await workspaceOf(String(body?.projectId ?? ''))
-        if (workspace === null) {
-          sendJson(response, 404, { error: { code: 'NOT_FOUND', message: 'no such project' } })
-          return
-        }
-        const op = String(body?.op ?? '')
-        if (op === 'company.create') {
-          sendJson(response, 201, { data: { company: createCompany(workspace, body) } })
-          return
-        }
-        if (op === 'company.rename') {
-          sendJson(response, 200, { data: { company: renameCompany(workspace, Number(body?.id), body) } })
-          return
-        }
-        if (op === 'company.delete') {
-          sendJson(response, 200, { data: { deleted: deleteCompany(workspace, Number(body?.id)) } })
-          return
-        }
-        if (op === 'department.create') {
-          sendJson(response, 201, { data: { department: createDepartment(workspace, Number(body?.companyId), body) } })
-          return
-        }
-        if (op === 'department.update') {
-          sendJson(response, 200, { data: { department: updateDepartment(workspace, Number(body?.id), body) } })
-          return
-        }
-        if (op === 'department.delete') {
-          sendJson(response, 200, { data: { deleted: deleteDepartment(workspace, Number(body?.id)) } })
-          return
-        }
-        if (op === 'joblevel.create') {
-          sendJson(response, 201, { data: { jobLevel: createJobLevel(workspace, Number(body?.companyId), body) } })
-          return
-        }
-        if (op === 'joblevel.update') {
-          sendJson(response, 200, { data: { jobLevel: updateJobLevel(workspace, Number(body?.id), body) } })
-          return
-        }
-        if (op === 'joblevel.delete') {
-          sendJson(response, 200, { data: { deleted: deleteJobLevel(workspace, Number(body?.id)) } })
-          return
-        }
-        sendJson(response, 400, { error: { code: 'BAD_REQUEST', message: `unknown op ${op}` } })
-      } catch (error) {
-        fail(error)
-      }
-    },
-  }
 
   const browseRoute = {
     kind: 'exact',
@@ -1544,12 +974,6 @@ export function apply(ctx, row) {
   }
 
 
-  /** Native organization section of the panel: same tables the app owns. */
-
-
-
-  /** Native organization section of the panel: same tables the app owns. */
-
   ctx.inject(['webServer'], webCtx => {
     webCtx.effect(() => {
       const webServer = webCtx.get('webServer')
@@ -1579,17 +1003,12 @@ export function apply(ctx, row) {
         register(decideRoute),
         register(requirementsRoute),
         register(configRoute),
-        register(employeesRoute),
-        register(servicesRoute),
-        register(orgRoute),
         register(pickRoute),
         register(browseRoute),
         register(jobConfigRoute),
-        register(financeRoute),
         register(taskRoute),
       ]
       return () => {
-        disposeAll()
         for (const dispose of disposers) {
           try {
             dispose?.()
@@ -1598,7 +1017,7 @@ export function apply(ctx, row) {
           }
         }
       }
-    }, 'workbench: state route')
+    }, 'workbench: routes')
   })
 
   // The loop is event-driven: tool results, subagent endings and agent status

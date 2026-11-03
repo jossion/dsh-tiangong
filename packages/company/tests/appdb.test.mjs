@@ -65,7 +65,7 @@ test('an update accepts a row-shaped patch but still rejects truly unknown keys'
     // bookkeeping columns; that must not fail the save.
     const updated = updateEmployee(workspace, created.id, {
       ...created,
-      companyName: '华之语文化传播（北京）有限公司',
+      companyName: '示例文化传播有限公司',
       departmentName: '董事会',
       name: '李四改',
     })
