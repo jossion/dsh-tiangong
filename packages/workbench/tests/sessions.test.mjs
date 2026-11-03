@@ -334,3 +334,36 @@ test('waking a session created without a model selects one first', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('waking mounts the deployment preset before delivering the prompt', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const order = []
+    const ctx = fakeCtx({
+      agentPresets: {
+        async resolve() {
+          return { id: 'cordis' }
+        },
+        async select(agent, presetId) {
+          order.push(`preset:${presetId}:${agent.id}`)
+          return presetId
+        },
+      },
+      sessionController: {
+        async resolveAgent() {
+          return { agent: { id: 'session-abc' } }
+        },
+        async prompt() {
+          order.push('prompt')
+          return { accepted: true }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    const result = await bridge.wake('session-abc', 'go')
+    assert.equal(result.ok, true)
+    assert.deepEqual(order, ['preset:cordis:session-abc', 'prompt'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

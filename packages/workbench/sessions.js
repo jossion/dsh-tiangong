@@ -35,8 +35,9 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     }
   }
 
-  /** Sessions this process already ensured a model for. */
+  /** Sessions this process already ensured a model/preset for. */
   const modelSelected = new Set()
+  const presetSelected = new Set()
 
   const dataDir = () => config.dataDir
   const appsRoot = () => (typeof config.appsRoot === 'string' && config.appsRoot.trim() !== ''
@@ -111,6 +112,46 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   }
 
   /**
+   * Mount the deployment's default agent preset on a Session.
+   *
+   * `sessionController.create` records a preset name, but a turn assembled
+   * without the deployment composition lacks its prompt variables (the
+   * observed failure is `{{model}}`), so we mount the resolved default once.
+   */
+  async function ensureDefaultPreset(controller, sessionId) {
+    const presets = optional('agentPresets')
+    if (presets === null || presets === undefined) return null
+    if (typeof presets.resolve !== 'function' || typeof presets.select !== 'function') return null
+    let resolved = null
+    try {
+      const wanted = typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
+        ? config.agentPreset.trim()
+        : undefined
+      resolved = await presets.resolve(wanted)
+    } catch {
+      return null
+    }
+    const presetId = typeof resolved?.id === 'string' && resolved.id !== '' ? resolved.id : null
+    if (presetId === null) return null
+    let agent = null
+    try {
+      const result = typeof controller.resolveAgent === 'function'
+        ? await controller.resolveAgent(sessionId)
+        : null
+      agent = result?.agent ?? null
+    } catch {
+      agent = null
+    }
+    if (agent === null) return null
+    try {
+      await presets.select(agent, presetId)
+      return presetId
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Select the deployment's default model on a freshly created Session.
    * A Session only receives a model when the caller installs one; a turn that
    * starts without it dies in prompt assembly ("{{model}} has no value").
@@ -162,8 +203,12 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     // the deployment preset, which a raw followup on a hand-built agent lacks.
     const controller = optional('sessionController')
     if (controller !== null && controller !== undefined && typeof controller.prompt === 'function') {
-      // A session created before the model was selected (or created by an older
-      // build of this bridge) must get one before its first turn.
+      // A session created before the preset/model was installed (or created by
+      // an older build of this bridge) must get both before its first turn.
+      if (!presetSelected.has(sessionId)) {
+        await ensureDefaultPreset(controller, sessionId)
+        presetSelected.add(sessionId)
+      }
       if (!modelSelected.has(sessionId)) {
         await selectDefaultModel(controller, sessionId)
         modelSelected.add(sessionId)
