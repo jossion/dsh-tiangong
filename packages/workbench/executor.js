@@ -124,6 +124,9 @@ export function readyWork(board, { projectId = null, jobId = null, limit = 3 } =
     owner: task.owner,
     role: task.role,
     stage: task.stage,
+    // The board's current state, so the caller can tell a fresh card from one
+    // already running (a re-called next_work must not claim it twice).
+    status: task.status,
     // "Do not do these" is about the *other* items: a child should never be
     // told to avoid the one thing it was asked to build.
     prompt: workItemPrompt({

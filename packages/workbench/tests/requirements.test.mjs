@@ -65,6 +65,27 @@ test('docx/pdf are explicit "not yet" errors, not silent garbage', () => {
   }
 })
 
+test('a change request carries its parent job and kind', () => {
+  const { ok, requirement } = normalizeRequirement({
+    projectId: 'p1',
+    text: '修复员工列表导出',
+    parentJobId: 'job-1',
+    kind: 'fix',
+  })
+  assert.equal(ok, true)
+  assert.equal(requirement.parentJobId, 'job-1')
+  assert.equal(requirement.kind, 'fix')
+
+  // A plain new task has neither field, so its shape does not change.
+  const plain = normalizeRequirement({ projectId: 'p1', text: '员工管理' })
+  assert.equal('parentJobId' in plain.requirement, false)
+  assert.equal('kind' in plain.requirement, false)
+
+  const bad = normalizeRequirement({ projectId: 'p1', text: 'x', kind: 'rewrite' })
+  assert.equal(bad.ok, false)
+  assert.match(bad.issues.join('; '), /kind must be one of/)
+})
+
 test('empty, oversized and malformed input is refused with every issue', () => {
   assert.equal(normalizeRequirement({}).ok, false)
   assert.match(normalizeRequirement({}).issues.join('; '), /projectId is required/)
@@ -135,4 +156,24 @@ test('the planning directive carries the requirement, the job and the submit too
   assert.match(directive, /\/tmp\/app/)
   assert.match(directive, /requirements\/job-1\.md/)
   assert.match(directive, /do not report completion/i)
+  assert.match(directive, /at most 10 tool calls/)
+  assert.match(directive, /diagnose card/)
+})
+
+test('a follow-up planning directive names the parent job and its kind', () => {
+  const requirement = assertRequirement({
+    projectId: 'p1',
+    text: '修复员工列表导出',
+    parentJobId: 'job-parent',
+    kind: 'fix',
+  })
+  const directive = planningDirective({
+    project: { id: 'p1', title: '公司管理' },
+    job: { jobId: 'job-child', workspace: '/tmp/app', parentJobId: 'job-parent', kind: 'fix', parentTitle: '员工管理' },
+    requirement,
+  })
+  assert.match(directive, /bug-fix follow-up/)
+  assert.match(directive, /job-parent/)
+  assert.match(directive, /员工管理/)
+  assert.match(directive, /do not rebuild its whole scope/i)
 })

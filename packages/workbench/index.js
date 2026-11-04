@@ -49,7 +49,7 @@ const CONFIG_DEFAULTS = Object.freeze({
   model: '',
   autoRun: true,
   wakeCooldownMs: 4000,
-  planTimeoutMs: 900000,
+  planTimeoutMs: 300000,
   planNudgeMs: 120000,
   maxRounds: 60,
   budgetUsd: 0,
@@ -105,7 +105,7 @@ try {
       model: z.string().description('Model for the legacy host-side planner; empty uses the deployment default.').default(''),
       autoRun: z.boolean().description('Drive intake-created jobs automatically.').default(true),
       wakeCooldownMs: z.number().min(0).description('Minimum gap between two wakes of the same agent.').default(4000),
-      planTimeoutMs: z.number().min(0).description('A planning turn that never submits a plan is handed to a person after this many milliseconds.').default(900000),
+      planTimeoutMs: z.number().min(0).description('A planning turn that never submits a plan is handed to a person after this many milliseconds.').default(300000),
       planNudgeMs: z.number().min(0).description('Send one planning reminder after this many milliseconds.').default(120000),
       maxRounds: z.number().min(0).description('Wake-round trip breaker per job.').default(60),
       budgetUsd: z.number().min(0).description('USD budget; 0 disables the gate (prices below must be set to make it meaningful).').default(0),
@@ -141,6 +141,8 @@ export const CONFIG_PATH = '/workbench/project-config'
 export const JOB_CONFIG_PATH = '/workbench/job-config'
 /** Requirements: one route, POST only. A requirement opens a job. */
 export const REQUIREMENTS_PATH = '/workbench/requirements'
+/** Speech-to-text passthrough: the panel records, the host transcribes. */
+export const TRANSCRIBE_PATH = '/workbench/transcribe'
 
 export const PICK_PATH = '/workbench/pick-path'
 export const BROWSE_PATH = '/workbench/browse-path'
@@ -177,6 +179,8 @@ const MAX_BODY_BYTES = 16 * 1024
  * limited by `requirements.js`, and this is only the transport ceiling.
  */
 const MAX_UPLOAD_BYTES = 1024 * 1024
+/** A 16 kHz mono WAV minute is ~1.9 MB; base64 adds a third. */
+const MAX_AUDIO_BYTES = 32 * 1024 * 1024
 
 /** Read a JSON request body from a Node stream (or a pre-set string in tests). */
 async function readJsonBody(request, limit = MAX_BODY_BYTES) {
@@ -318,6 +322,38 @@ export function apply(ctx, row) {
   // delivery runner stay module-local; the tool and the route below are the
   // plugin's public surface.
 
+  /** The composition's speech-to-text registry; optional by design. */
+  const speechService = () => {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('speechToText') : undefined
+      return service && typeof service.transcribe === 'function' ? service : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** What the panel needs to decide whether a microphone makes sense. */
+  const speechInfo = () => {
+    const service = speechService()
+    if (service === undefined) return { available: false, selection: null, providers: [] }
+    try {
+      const snapshot = typeof service.snapshot === 'function' ? service.snapshot() : null
+      return {
+        available: true,
+        selection: snapshot?.selection ?? null,
+        providers: Array.isArray(snapshot?.providers)
+          ? snapshot.providers.map(provider => ({
+              id: String(provider?.id ?? ''),
+              name: String(provider?.name ?? ''),
+              phase: String(provider?.preparation?.phase ?? 'unknown'),
+            })).filter(provider => provider.id !== '')
+          : [],
+      }
+    } catch {
+      return { available: true, selection: null, providers: [] }
+    }
+  }
+
   // Read-only state route for the panel.
   //
   // It rides a `webServer` sub-fiber rather than a one-shot `ctx.get` during
@@ -344,6 +380,7 @@ export function apply(ctx, row) {
           summary,
           board,
           planning: delivery.isRunning(),
+          speech: speechInfo(),
           events: [...all].slice(-30).reverse(),
         })
       } catch (error) {
@@ -909,13 +946,32 @@ export function apply(ctx, row) {
         sendJson(response, 409, { error: { code: 'project-stopped', message: `project is ${project.status}` } })
         return
       }
+      // A change request points at a delivered job in the same project. A
+      // stale id would create a dangling lineage, so refuse it here.
+      const parentJobId = typeof requirement.parentJobId === 'string' ? requirement.parentJobId : ''
+      if (parentJobId !== '') {
+        const parent = (project.jobs ?? []).find(item => item.id === parentJobId)
+        if (parent === undefined) {
+          sendJson(response, 400, { error: { code: 'unknown-parent-job', message: `unknown parent job: ${parentJobId}` } })
+          return
+        }
+      }
       const now = new Date().toISOString()
       const jobId = `deliveries_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
       const stored = await storeRequirement(config.dataDir, jobId, requirement)
       const brief = requirement.text.slice(0, 280)
       await events.append(projectEvent({ projectId: project.id, event: 'started', brief, ts: now }))
       await events.append(jobEvent({
-        projectId: project.id, jobId, title: requirement.title, brief, event: 'created', ts: now,
+        projectId: project.id,
+        jobId,
+        title: requirement.title,
+        brief,
+        event: 'created',
+        // Follow-up lineage: a change request is a new job that names the
+        // delivered one, so the finished job never rewrites itself.
+        ...(parentJobId === '' ? {} : { parentJobId }),
+        ...(typeof requirement.kind === 'string' && requirement.kind !== '' ? { jobKind: requirement.kind } : {}),
+        ts: now,
       }))
       await events.append(requirementEvent({
         projectId: project.id,
@@ -933,6 +989,8 @@ export function apply(ctx, row) {
         status: 'accepted',
         projectId: project.id,
         jobId,
+        ...(parentJobId === '' ? {} : { parentJobId }),
+        ...(typeof requirement.kind === 'string' && requirement.kind !== '' ? { kind: requirement.kind } : {}),
         requirement: {
           title: requirement.title,
           source: requirement.source,
@@ -940,6 +998,73 @@ export function apply(ctx, row) {
           file: stored.relative,
         },
       })
+    },
+  }
+
+  /**
+   * Record in the browser, transcribe on the host. The panel never talks to a
+   * recognizer directly: the host owns the model, its readiness and its
+   * cancellation, and the returned text is only ever inserted into the draft.
+   */
+  const transcribeRoute = {
+    kind: 'exact',
+    path: TRANSCRIBE_PATH,
+    handler: async (request, response) => {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+        return
+      }
+      if (!isSameOrigin(request)) {
+        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
+        return
+      }
+      const service = speechService()
+      if (service === undefined) {
+        sendJson(response, 501, {
+          error: { code: 'speech-unavailable', message: 'this host has no speech-to-text provider enabled' },
+        })
+        return
+      }
+      let body = null
+      try {
+        body = await readJsonBody(request, MAX_AUDIO_BYTES)
+      } catch (error) {
+        sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
+        return
+      }
+      const encoded = typeof body?.audio === 'string' ? body.audio : ''
+      if (encoded === '') {
+        sendJson(response, 400, { error: { code: 'bad-request', message: 'audio is required' } })
+        return
+      }
+      let audio
+      try {
+        audio = Buffer.from(encoded, 'base64')
+      } catch (error) {
+        sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
+        return
+      }
+      if (audio.length === 0) {
+        sendJson(response, 400, { error: { code: 'bad-request', message: 'audio is empty' } })
+        return
+      }
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 120_000)
+      try {
+        const spec = service.resolve({ audio })
+        const result = await service.transcribe(spec, controller.signal)
+        sendJson(response, 200, {
+          text: String(result?.text ?? '').trim(),
+          audioSeconds: result?.audioSeconds ?? null,
+          inferenceSeconds: result?.inferenceSeconds ?? null,
+        })
+      } catch (error) {
+        sendJson(response, 502, {
+          error: { code: 'transcribe-failed', message: String(error?.message ?? error) },
+        })
+      } finally {
+        clearTimeout(timer)
+      }
     },
   }
 
@@ -1025,6 +1150,7 @@ export function apply(ctx, row) {
         register(controlRoute),
         register(decideRoute),
         register(requirementsRoute),
+        register(transcribeRoute),
         register(configRoute),
         register(pickRoute),
         register(browseRoute),
@@ -1402,12 +1528,28 @@ export function apply(ctx, row) {
           if (!item.artifactDir) item.artifactDir = join(config.dataDir, 'deliveries', item.id)
         }
         const limit = Number.isInteger(Number(input?.limit)) ? Number(input.limit) : 3
-        const { project, work, stopped } = readyWork(board, {
+        const { project, job, work, stopped } = readyWork(board, {
           projectId: typeof input?.projectId === 'string' && input.projectId !== '' ? input.projectId : null,
           jobId: typeof input?.jobId === 'string' && input.jobId !== '' ? input.jobId : null,
           limit,
         })
         if (project === null) throw new Error('no project yet — plan one with workbench_plan_software first')
+        // Handing a card to a child is the moment it becomes active. Without
+        // this line the board keeps printing "todo" while the child already
+        // runs, which reads as "nothing is happening".
+        for (const item of work) {
+          if (item.status === 'active' || item.status === 'done') continue
+          try {
+            await events.append(taskEvent({
+              event: 'claimed',
+              taskId: item.taskId,
+              projectId: project.id,
+              jobId: job === null ? null : job.id,
+            }))
+          } catch {
+            /* the prompt is the point; a failed claim line must not block it */
+          }
+        }
         if (work.length === 0) {
           return JSON.stringify({
             projectId: project.id,

@@ -1,6 +1,6 @@
 {
   "name": "@jos/workbench",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Tiangong: a requirement-driven autonomous delivery workbench for DSH.",
   "exports": {
@@ -10,11 +10,13 @@
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
+    "cordis.patch.yml",
     "locale/*.json",
     "*.js",
     "icon.svg",
     "assets/icon-180.png",
     "docs/assets/*.png",
+    "docs/*.md",
     "README.md",
     "LICENSE"
   ],

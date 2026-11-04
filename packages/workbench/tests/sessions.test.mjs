@@ -192,6 +192,32 @@ test('waking prefers the session controller, which mounts the deployment', async
   }
 })
 
+test('a reminder can steer the running turn instead of queueing behind it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const prompted = []
+    const ctx = fakeCtx({
+      sessionController: {
+        async prompt(request) {
+          prompted.push(request)
+          return { accepted: true }
+        },
+        async create() {
+          return { sessionId: 'session-abc' }
+        },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+
+    const result = await bridge.wake('session-abc', 'hurry up', { deliver: 'steer' })
+    assert.equal(result.ok, true)
+    assert.equal(prompted[0].mode, 'steer', 'a reminder reaches the running turn, not the next one')
+    assert.equal(prompted[0].content[0].text, 'hurry up')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('a workspace registered by a failed attempt is reused on the next try', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
   try {

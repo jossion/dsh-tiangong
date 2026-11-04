@@ -258,10 +258,16 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
    * `ok:false` is a normal outcome (no session/agent mounted); the dispatcher
    * turns it into a human gate instead of retrying forever.
    */
-  async function wake(sessionId, text) {
+  async function wake(sessionId, text, options = {}) {
     if (typeof sessionId !== 'string' || sessionId === '') {
       return { ok: false, error: 'no session bound' }
     }
+    // `deliver: 'queue'` (the default) admits the message as the next turn — the
+    // right shape for a fresh planning/dispatch round. `deliver: 'steer'`
+    // injects it into the running turn at its next step boundary, which is the
+    // only delivery mode that can stop an overrunning turn; a reminder sent as
+    // 'queue' is read after the turn it was meant to shorten has already ended.
+    const mode = options?.deliver === 'steer' ? 'steer' : 'queue'
     // The sanctioned path: the session controller resumes the Agent for us and
     // admits the prompt through the same door the panel uses. It also mounts
     // the deployment preset, which a raw followup on a hand-built agent lacks.
@@ -274,7 +280,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
         const receipt = await controller.prompt({
           requestId: randomUUID(),
           sessionId,
-          mode: 'queue',
+          mode,
           content: [{ type: 'text', text: String(text) }],
         })
         if (receipt?.accepted === true) return { ok: true, via: 'session-controller', preparation }

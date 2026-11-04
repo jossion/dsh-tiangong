@@ -6,12 +6,12 @@ import { join } from 'node:path'
 
 import { createEventLog } from '../events.js'
 import { jobEvent, planEvent, projectEvent, requirementEvent, taskEvent } from '../projects.js'
-import { createDispatcher } from '../dispatch.js'
+import { createDispatcher, planningText } from '../dispatch.js'
 
 const config = {
   autoRun: true,
   wakeCooldownMs: 60_000,
-  planTimeoutMs: 900_000,
+  planTimeoutMs: 300_000,
   maxRounds: 10,
   dataDir: '',
 }
@@ -27,8 +27,8 @@ function fakeSessions(overrides = {}) {
       if (overrides.ensure !== undefined) return overrides.ensure(project)
       return { ok: true, sessionId: 'sess-1', workspace: '/tmp/app', workspaceId: null }
     },
-    async wake(sessionId, text) {
-      calls.wake.push({ sessionId, text })
+    async wake(sessionId, text, options) {
+      calls.wake.push({ sessionId, text, deliver: options?.deliver ?? null })
       if (overrides.wake !== undefined) return overrides.wake(sessionId, text)
       return { ok: true }
     },
@@ -239,7 +239,7 @@ test('a planning turn that overruns gets one reminder, then waits for the hard t
     let clock = 1_000_000
     const dispatcher = createDispatcher({
       ctx: silentCtx,
-      config: { ...config, dataDir: dir, planNudgeMs: 60_000, planTimeoutMs: 900_000 },
+      config: { ...config, dataDir: dir, planNudgeMs: 60_000, planTimeoutMs: 300_000 },
       events: log,
       sessions,
       now: () => clock,
@@ -248,11 +248,15 @@ test('a planning turn that overruns gets one reminder, then waits for the hard t
     await dispatcher.tick()
     assert.equal(sessions.calls.wake.length, 1, 'the planning turn is woken')
     assert.match(sessions.calls.wake[0].text, /workbench_submit_plan/)
+    assert.equal(sessions.calls.wake[0].deliver, null, 'the planning round is queued, not steered')
 
     clock += 61_000
     await dispatcher.tick()
     assert.equal(sessions.calls.wake.length, 2, 'one reminder is sent')
     assert.match(sessions.calls.wake[1].text, /You have not submitted a plan/)
+    assert.match(sessions.calls.wake[1].text, /Stop exploring now/)
+    assert.match(sessions.calls.wake[1].text, /diagnose card/)
+    assert.equal(sessions.calls.wake[1].deliver, 'steer', 'the reminder steers the running turn')
 
     clock += 5_000
     await dispatcher.tick()
@@ -316,4 +320,15 @@ test('a stalled agent stops being woken and lands on a person', async () => {
     assert.ok(decision !== undefined)
     assert.match(JSON.stringify(decision.evidence), /stalled/)
   })
+})
+
+test('a change-request planning round names the job it follows', () => {
+  const text = planningText({
+    project: { id: 'p1', title: '公司管理', jobs: [{ id: 'j0', title: '员工管理' }] },
+    job: { id: 'j1', workspace: '/tmp/app', parentJobId: 'j0', kind: 'fix' },
+    requirement: { text: '修复导出', title: '修复导出', source: 'text', file: null },
+  })
+  assert.match(text, /bug-fix follow-up/)
+  assert.match(text, /j0/)
+  assert.match(text, /员工管理/)
 })
