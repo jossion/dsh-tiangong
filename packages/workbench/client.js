@@ -101,7 +101,7 @@ window.__ModuleLoader__.load({
         pauseRun: 'Pause',
         resumeRun: 'Resume',
         cancelRun: 'Stop',
-        cancelConfirm: 'Stop this project? Running tasks keep their completed work; the queue closes for good.',
+        cancelConfirm: 'Stop dispatching new cards? Completed work stays; running agents are not killed, and you can resume dispatch from the toolbar afterwards.',
         statusPlanning: 'planning',
         statusPaused: 'paused',
         statusCancelled: 'stopped',
@@ -408,7 +408,7 @@ window.__ModuleLoader__.load({
         pauseRun: '暂停',
         resumeRun: '继续',
         cancelRun: '终止',
-        cancelConfirm: '确定终止这个项目？已完成的卡会保留，队列将不再派发新任务。',
+        cancelConfirm: '确定终止派发？已完成的卡会保留；正在运行的 agent 不会被结束，之后可以点「继续」恢复派发。',
         statusPlanning: '规划中',
         statusPaused: '已暂停',
         statusCancelled: '已终止',
@@ -3127,7 +3127,7 @@ window.__ModuleLoader__.load({
                   onClick: () => setWorkspaceOpen(true),
                 }, `📁 ${t('workspaceButton')}`)
               : null,
-            scopeStatus === 'paused'
+            scopeStatus === 'paused' || scopeStatus === 'cancelled'
               ? h('button', {
                   type: 'button', className: 'wb-btn wb-tool',
                   style: { ...s.tool, ...s.toolWarn },

@@ -202,6 +202,24 @@ test('the dev page can pause, resume and stop the project', () => {
   walk(paused, node => { if (node.type === 'button') pausedButtons.push(node) })
   pausedButtons.find(button => button.props.children === 'resumeRun').props.onClick()
   assert.deepEqual(calls, ['pause', 'resume'])
+
+  // Terminating only closes the dispatch queue: the toolbar offers resume again,
+  // because agents that were already running keep reporting after a stop.
+  const cancelled = ProjectDetail({
+    t,
+    project: { ...project, status: 'cancelled' },
+    summary: {},
+    events: [],
+    onBack: () => {},
+    onControl: action => calls.push(action),
+  })
+  const cancelledButtons = []
+  walk(cancelled, node => { if (node.type === 'button') cancelledButtons.push(node) })
+  const resume = cancelledButtons.find(button => button.props.children === 'resumeRun')
+  assert.ok(resume, 'a stopped project can be resumed')
+  resume.props.onClick()
+  assert.deepEqual(calls, ['pause', 'resume', 'resume'])
+  assert.equal(cancelledButtons.some(button => button.props.children === 'pauseRun'), false, 'pause is not offered on a stopped scope')
 })
 
 test('the project page is a canvas carrying HUD panels', () => {

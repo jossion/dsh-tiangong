@@ -1,9 +1,4 @@
-# dependencies
 node_modules/
-
-# macOS
 .DS_Store
-
-# local preview artifacts
 packages/workbench/preview/out/
 packages/workbench/preview/.chrome-profile/
