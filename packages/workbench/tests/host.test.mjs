@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, apply, pickScript} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pickScript} from '../index.js'
 import { createEventLog } from '../events.js'
 import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
 
@@ -51,7 +51,7 @@ function fakeLlm() {
   }
 }
 
-function fakeContext({ withWebServer = true, withLlm = true, connection = null } = {}) {
+function fakeContext({ withWebServer = true, withLlm = true, connection = null, services = {} } = {}) {
   const routes = []
   const tools = []
   const disposers = []
@@ -80,6 +80,7 @@ function fakeContext({ withWebServer = true, withLlm = true, connection = null }
   const ctx = {
     // A one-shot read during apply must find nothing, like the real thing.
     get(name) {
+      if (Object.prototype.hasOwnProperty.call(services, name)) return services[name]
       if (name === 'connection' && connection !== null) return connection
       throw new Error('cannot get property "webServer" without inject')
     },
@@ -133,7 +134,7 @@ test('the host mounts a read route and a write route, separately', async () => {
     apply(ctx, { dataDir })
 
     assert.deepEqual(routes.map(route => route.path).sort(),
-      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, JOB_CONFIG_PATH, TASK_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH].sort())
+      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, JOB_CONFIG_PATH, TASK_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH, TRANSCRIBE_PATH].sort())
     assert.equal(routes.every(route => !route.path.startsWith('/company')), true, 'company routes belong to @jos/company')
     assert.equal(STATE_PATH, '/workbench/state')
     assert.equal(START_PATH, '/workbench/start')
@@ -221,7 +222,7 @@ test('both routes disappear when the plugin is disposed', async () => {
   await withDataDir(async dataDir => {
     const { ctx, routes, disposers } = fakeContext()
     apply(ctx, { dataDir })
-    assert.equal(routes.length, 11)
+    assert.equal(routes.length, 12)
 
     const response = fakeResponse()
     await routes[0].handler({ method: 'GET' }, response)
@@ -999,5 +1000,145 @@ test('a project card can be deleted without erasing its history', async () => {
     await projectsRoute.handler(deleteRequest({}), missing)
     assert.equal(missing.status, 400)
     assert.equal(JSON.parse(missing.body).error.code, 'bad-request')
+  })
+})
+
+test('POST /workbench/requirements records a change request against its delivered job', async () => {
+  await withDataDir(async dataDir => {
+    // Seed the delivered job before the plugin's log loads, so its in-memory
+    // projection contains the parent the change request points at.
+    const seed = createEventLog(join(dataDir, 'events.jsonl'))
+    await seed.append(projectEvent({ projectId: 'prj_seed', title: '公司管理', event: 'created' }))
+    await seed.append(jobEvent({ projectId: 'prj_seed', jobId: 'job_parent', title: '员工管理', event: 'done' }))
+
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const requirementsRoute = routes.find(route => route.path === REQUIREMENTS_PATH)
+    const projectId = 'prj_seed'
+
+    const accepted = fakeResponse()
+    await requirementsRoute.handler(postRequest({
+      projectId,
+      text: '修复员工列表导出',
+      parentJobId: 'job_parent',
+      kind: 'fix',
+    }), accepted)
+    assert.equal(accepted.status, 202)
+    const body = JSON.parse(accepted.body)
+    assert.equal(body.parentJobId, 'job_parent')
+    assert.equal(body.kind, 'fix')
+
+    const lines = (await readFile(join(dataDir, 'events.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const child = lines.find(line => line.kind === 'job' && line.jobId === body.jobId)
+    assert.equal(child.parentJobId, 'job_parent', 'lineage is on the job line, not the requirement line')
+    assert.equal(child.jobKind, 'fix')
+    assert.ok(lines.some(line => line.kind === 'requirement' && line.jobId === body.jobId), 'the intake still records the requirement')
+
+    // The projection must carry both lineage and the requirement: the dispatch
+    // loop only auto-drives jobs with a requirement, which is what makes a
+    // change request run without a manual "start execution" click.
+    const board = buildBoard(lines)
+    const job = board.projects
+      .find(project => project.id === projectId)
+      .jobs.find(item => item.id === body.jobId)
+    assert.equal(job.parentJobId, 'job_parent')
+    assert.equal(job.kind, 'fix')
+    assert.ok(job.requirement, 'the follow-up job is managed by the closed loop')
+
+    const unknown = fakeResponse()
+    await requirementsRoute.handler(postRequest({ projectId, text: 'x', parentJobId: 'nope' }), unknown)
+    assert.equal(unknown.status, 400)
+    assert.equal(JSON.parse(unknown.body).error.code, 'unknown-parent-job')
+
+    const badKind = fakeResponse()
+    await requirementsRoute.handler(postRequest({ projectId, text: 'x', kind: 'rewrite' }), badKind)
+    assert.equal(badKind.status, 400)
+    assert.equal(JSON.parse(badKind.body).error.code, 'invalid-requirement')
+  })
+})
+
+test('handing out a card marks it active so the board shows work in progress', async () => {
+  await withDataDir(async dataDir => {
+    const seed = createEventLog(join(dataDir, 'events.jsonl'))
+    await seed.append(projectEvent({ projectId: 'prj_x', title: '公司管理', event: 'created' }))
+    await seed.append(jobEvent({ projectId: 'prj_x', jobId: 'job_x', title: '贪吃蛇', event: 'created', sessionId: 's1' }))
+    await seed.append(taskEvent({
+      event: 'created', taskId: 'job_x:wi:logic', projectId: 'prj_x', jobId: 'job_x',
+      stage: 'build', owner: 'backend', title: '逻辑层',
+    }))
+
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+    const next = tools.find(tool => tool.name === 'workbench_next_work')
+    const first = JSON.parse(await next.execute({ jobId: 'job_x' }))
+    assert.deepEqual(first.work.map(item => item.taskId), ['job_x:wi:logic'])
+    assert.equal(first.work[0].status, 'todo')
+
+    const lines = (await readFile(join(dataDir, 'events.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+    const claims = () => lines.filter(line => line.kind === 'task' && line.event === 'claimed' && line.taskId === 'job_x:wi:logic')
+    assert.equal(claims().length, 1, 'the handed-out card is claimed once')
+
+    const board = buildBoard(lines)
+    const job = board.projects[0].jobs.find(item => item.id === 'job_x')
+    const card = job.roots.find(item => item.id === 'job_x:wi:logic')
+    assert.equal(card.status, 'active', 'the board stops saying todo while the child runs')
+
+    // A second dispatch round must not stack a second claim on the same card.
+    await next.execute({ jobId: 'job_x' })
+    const after = (await readFile(join(dataDir, 'events.jsonl'), 'utf8'))
+      .trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+    assert.equal(
+      after.filter(line => line.kind === 'task' && line.event === 'claimed' && line.taskId === 'job_x:wi:logic').length,
+      1,
+      'a running card is not claimed twice',
+    )
+  })
+})
+
+
+test('POST /workbench/transcribe hands audio to the host recognizer', async () => {
+  await withDataDir(async dataDir => {
+    const calls = []
+    const speechToText = {
+      snapshot: () => ({ providers: [{ id: 'sensevoice-local', name: 'SenseVoice', preparation: { phase: 'ready' } }], selection: { providerId: 'sensevoice-local', language: 'zh' } }),
+      resolve: request => {
+        calls.push(request.audio.length)
+        return { audio: request.audio, provider: { id: 'sensevoice-local' } }
+      },
+      async transcribe() {
+        return { text: '把蛇改成真蛇', audioSeconds: 1.4, inferenceSeconds: 0.2 }
+      },
+    }
+    const { ctx, routes } = fakeContext({ services: { speechToText } })
+    apply(ctx, { dataDir })
+    const route = routes.find(item => item.path === TRANSCRIBE_PATH)
+    assert.ok(route, 'the panel has a transcription route')
+
+    const response = fakeResponse()
+    await route.handler(postRequest({ audio: Buffer.from('RIFFxxxxWAVE').toString('base64') }), response)
+    assert.equal(response.status, 200)
+    const body = JSON.parse(response.body)
+    assert.equal(body.text, '把蛇改成真蛇')
+    assert.deepEqual(calls, [12], 'the decoded bytes reach the recognizer')
+
+    // The state route exposes whether a microphone makes sense at all.
+    const stateRoute = routes.find(item => item.path === STATE_PATH)
+    const state = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, state)
+    assert.equal(JSON.parse(state.body).speech.available, true)
+  })
+})
+
+test('transcription without a host recognizer reports a clean 501', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const route = routes.find(item => item.path === TRANSCRIBE_PATH)
+    const response = fakeResponse()
+    await route.handler(postRequest({ audio: 'AAAA' }), response)
+    assert.equal(response.status, 501)
+    assert.equal(JSON.parse(response.body).error.code, 'speech-unavailable')
   })
 })

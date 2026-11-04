@@ -80,6 +80,8 @@ window.__ModuleLoader__.load({
         taskOpenCockpit: 'Open cockpit →',
         taskOpenDone: 'Review result →',
         followUp: 'Change request',
+        taskGroupLabel: 'Task group',
+        followUpsTitle: 'Changes',
         followUpHint: 'Delivered tasks stay as they are; a change is a new task linked to this one.',
         followUpPrefill: 'Change “{name}”: ',
         kindChange: 'Change',
@@ -87,7 +89,7 @@ window.__ModuleLoader__.load({
         kindFeature: 'Feature',
         kindLabel: 'Kind',
         taskFrom: 'from',
-        taskFollowUps: '{n} follow-ups',
+        taskFollowUps: '{n} change(s)',
         deliverablePage: 'Delivered',
         projectHomeHint: 'What this project already produces. Open a task only to change something.',
         taskCockpit: 'Task cockpit',
@@ -100,6 +102,7 @@ window.__ModuleLoader__.load({
         resumeRun: 'Resume',
         cancelRun: 'Stop',
         cancelConfirm: 'Stop this project? Running tasks keep their completed work; the queue closes for good.',
+        statusPlanning: 'planning',
         statusPaused: 'paused',
         statusCancelled: 'stopped',
         statusRunning: 'running',
@@ -149,6 +152,12 @@ window.__ModuleLoader__.load({
         convoInDsh: 'Open in DSH',
         convoSend: 'Send',
         convoSending: 'Sending…',
+        voiceStart: 'Voice input',
+        voiceStop: 'Stop recording',
+        voiceTranscribing: 'Transcribing…',
+        voiceEmpty: 'Nothing was transcribed — try again closer to the microphone.',
+        voiceUnsupported: 'This window cannot record audio.',
+        voiceUnavailable: 'Voice input is not enabled on this host.',
         attachImage: 'Image',
         attachHint: 'Paste or drop an image',
         attachTooBig: 'Each image must be under 8 MB.',
@@ -333,6 +342,8 @@ window.__ModuleLoader__.load({
         taskOpenCockpit: '打开驾驶舱 →',
         taskOpenDone: '查看结果 →',
         followUp: '修改/修复',
+        taskGroupLabel: '任务组',
+        followUpsTitle: '后续修改',
         followUpHint: '已完成任务不回改；改动会作为新任务创建，并关联到这个任务。',
         followUpPrefill: '修改「{name}」：',
         kindChange: '修改',
@@ -340,7 +351,7 @@ window.__ModuleLoader__.load({
         kindFeature: '新增功能',
         kindLabel: '类型',
         taskFrom: '来自',
-        taskFollowUps: '{n} 个后续任务',
+        taskFollowUps: '后续 {n} 次修改',
         deliverablePage: '交付',
         projectHomeHint: '这个项目现在能产出什么。只有要改动时才进任务。',
         taskCockpit: '任务驾驶舱',
@@ -353,6 +364,7 @@ window.__ModuleLoader__.load({
         resumeRun: '继续',
         cancelRun: '终止',
         cancelConfirm: '确定终止这个项目？已完成的卡会保留，队列将不再派发新任务。',
+        statusPlanning: '规划中',
         statusPaused: '已暂停',
         statusCancelled: '已终止',
         statusRunning: '进行中',
@@ -402,6 +414,12 @@ window.__ModuleLoader__.load({
         convoInDsh: '在 DSH 打开',
         convoSend: '发送',
         convoSending: '发送中…',
+        voiceStart: '语音输入',
+        voiceStop: '停止录音',
+        voiceTranscribing: '正在转写…',
+        voiceEmpty: '没有识别到内容，靠近麦克风再试一次。',
+        voiceUnsupported: '当前窗口无法录音。',
+        voiceUnavailable: '当前宿主没有启用语音识别。',
         attachImage: '图片',
         attachHint: '粘贴或拖入图片',
         attachTooBig: '单张图片不能超过 8MB。',
@@ -540,6 +558,32 @@ window.__ModuleLoader__.load({
       todo: 'var(--dsw-alias-label-secondary)',
     }
 
+    /**
+     * One job's status label. A job with a card tree is running until it is
+     * done — the old rule keyed on `running > 0`, so a job whose cards were
+     * not claimed yet printed "待执行" while its children were already working.
+     */
+    function jobStatusOf(t, job) {
+      if (job.status === 'paused') return t('statusPaused')
+      if (job.status === 'cancelled') return t('statusCancelled')
+      if (job.status === 'done') return t('boardDone')
+      const progress = job.progress || { done: 0, total: 0 }
+      if ((job.running || 0) > 0) return t('statusRunning')
+      // Only an intake job is auto-driven: once it has cards it is running,
+      // and between planning and the first card it is planning. A legacy job
+      // (no requirement) stays "ready to execute" until a person kicks it.
+      const managed = job.requirement !== null && job.requirement !== undefined
+      if (managed && progress.total > 0) return t('statusRunning')
+      if (managed && job.planBy) return t('statusPlanning')
+      return t('statusPlanned')
+    }
+
+    /** "2/4" for a job that has a card tree, empty before it has one. */
+    function jobProgressText(job) {
+      const progress = job.progress || { done: 0, total: 0 }
+      return progress.total > 0 ? `${progress.done}/${progress.total}` : ''
+    }
+
     const TEAM_OWNERS = ['workbench', 'backend', 'frontend', 'qa']
     const TEAM_COLORS = {
       backend: 'var(--dsw-alias-brand-primary, #4f8cff)',
@@ -593,10 +637,15 @@ window.__ModuleLoader__.load({
       },
       button: {
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        alignSelf: 'flex-start', padding: '8px 16px', borderRadius: '8px',
-        border: '1px solid var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)',
+        alignSelf: 'flex-start', padding: '8px 16px', borderRadius: '9px',
+        // A filled action keeps its own deep gradient instead of the theme's
+        // brand token: the token is a light lavender in this theme, so white
+        // text on it measured ~1.6:1. White on these stops is >= 5:1.
+        border: '1px solid rgba(255,255,255,.20)',
+        background: 'linear-gradient(135deg, #3f5cff 0%, #6b3dff 100%)',
         color: '#ffffff', font: 'inherit', fontSize: '13px', fontWeight: 600, letterSpacing: '.2px',
         whiteSpace: 'nowrap', cursor: 'pointer',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.26), 0 6px 16px rgba(63,92,255,.28)',
       },
       error: { color: 'var(--dsw-alias-state-error-primary)', fontSize: '13px', margin: 0 },
       list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
@@ -619,8 +668,111 @@ window.__ModuleLoader__.load({
         border: '1px solid var(--dsw-alias-border-l1)', color: 'var(--dsw-alias-label-secondary)',
         whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px',
       },
+      // Cockpit "instrument" controls: layered highlight + shade so they read
+      // as physical keys, with label-primary text instead of muted gray.
+      tool: {
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+        minHeight: '32px', padding: '0 12px', borderRadius: '9px',
+        border: '1px solid var(--dsw-alias-border-l2)',
+        background: 'linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.02))',
+        color: 'var(--dsw-alias-label-primary)', font: 'inherit',
+        fontSize: '12.5px', fontWeight: 600, letterSpacing: '.2px', whiteSpace: 'nowrap', cursor: 'pointer',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.12), 0 2px 6px rgba(0,0,0,.18)',
+      },
+      toolActive: {
+        borderColor: 'var(--dsw-alias-brand-primary)',
+        color: 'var(--dsw-alias-brand-primary)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.14), 0 0 0 1px rgba(79,140,255,.30), 0 2px 10px rgba(79,140,255,.18)',
+      },
+      toolPrimary: {
+        border: '1px solid rgba(255,255,255,.20)',
+        background: 'linear-gradient(135deg, #3f5cff 0%, #6b3dff 100%)',
+        color: '#ffffff',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,.28), 0 6px 18px rgba(63,92,255,.35)',
+      },
+      toolWarn: {
+        color: 'var(--dsw-alias-state-warning-primary)',
+        borderColor: 'rgba(210,153,34,.45)',
+      },
+      toolDanger: {
+        color: 'var(--dsw-alias-state-error-primary)',
+        borderColor: 'rgba(248,81,73,.45)',
+      },
       busy: { opacity: 0.6, cursor: 'wait' },
       dot: { width: '7px', height: '7px', borderRadius: '50%', display: 'inline-block', flex: '0 0 auto' },
+    }
+
+    // ---- voice input helpers -------------------------------------------------
+    // The host accepts one canonical shape: 16 kHz mono PCM16 WAV. The browser
+    // records whatever the platform gives us, so decode it, fold channels to
+    // mono, resample and write the header here rather than trusting the codec.
+    const VOICE_SAMPLE_RATE = 16000
+
+    function encodeVoiceWav(samples) {
+      const buffer = new ArrayBuffer(44 + samples.length * 2)
+      const view = new DataView(buffer)
+      const writeAscii = (offset, text) => {
+        for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index))
+      }
+      writeAscii(0, 'RIFF')
+      view.setUint32(4, 36 + samples.length * 2, true)
+      writeAscii(8, 'WAVE')
+      writeAscii(12, 'fmt ')
+      view.setUint32(16, 16, true)
+      view.setUint16(20, 1, true)
+      view.setUint16(22, 1, true)
+      view.setUint32(24, VOICE_SAMPLE_RATE, true)
+      view.setUint32(28, VOICE_SAMPLE_RATE * 2, true)
+      view.setUint16(32, 2, true)
+      view.setUint16(34, 16, true)
+      writeAscii(36, 'data')
+      view.setUint32(40, samples.length * 2, true)
+      let offset = 44
+      for (let index = 0; index < samples.length; index += 1) {
+        const clamped = Math.max(-1, Math.min(1, samples[index]))
+        view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+        offset += 2
+      }
+      return new Uint8Array(buffer)
+    }
+
+    function downsampleVoice(samples, inputRate) {
+      if (inputRate === VOICE_SAMPLE_RATE) return samples
+      const ratio = inputRate / VOICE_SAMPLE_RATE
+      const length = Math.max(1, Math.round(samples.length / ratio))
+      const output = new Float32Array(length)
+      for (let index = 0; index < length; index += 1) {
+        const start = Math.floor(index * ratio)
+        const end = Math.min(samples.length, Math.floor((index + 1) * ratio))
+        let sum = 0
+        for (let cursor = start; cursor < end; cursor += 1) sum += samples[cursor]
+        output[index] = sum / Math.max(1, end - start)
+      }
+      return output
+    }
+
+    async function voiceWavBase64(blob) {
+      const arrayBuffer = await blob.arrayBuffer()
+      const AudioCtx = window.AudioContext || window.webkitAudioContext
+      const audioContext = new AudioCtx()
+      try {
+        const decoded = await audioContext.decodeAudioData(arrayBuffer)
+        const frames = decoded.length
+        const mono = new Float32Array(frames)
+        for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+          const data = decoded.getChannelData(channel)
+          for (let index = 0; index < frames; index += 1) mono[index] += data[index] / decoded.numberOfChannels
+        }
+        const wav = encodeVoiceWav(downsampleVoice(mono, decoded.sampleRate))
+        let binary = ''
+        const chunkSize = 0x8000
+        for (let index = 0; index < wav.length; index += chunkSize) {
+          binary += String.fromCharCode.apply(null, wav.subarray(index, index + chunkSize))
+        }
+        return window.btoa(binary)
+      } finally {
+        try { await audioContext.close() } catch { /* already closed */ }
+      }
     }
 
     const WB_CSS = `
@@ -634,9 +786,29 @@ window.__ModuleLoader__.load({
 .wb-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; border-color: var(--dsw-alias-brand-primary) !important; }
 .wb-primary:hover { filter: brightness(1.08); }
 .wb-primary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+@keyframes wb-breathe {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 0 0 1px rgba(99,102,241,.32), 0 6px 16px rgba(63,92,255,.26); }
+  50% { box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 0 0 5px rgba(99,102,241,.16), 0 6px 24px rgba(63,92,255,.44); }
+}
+.wb-tool { transition: transform .14s ease, box-shadow .2s ease, border-color .2s ease, filter .2s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .wb-tool:hover { transform: translateY(-1px); filter: brightness(1.07); }
+}
+.wb-tool:active { transform: translateY(0); filter: brightness(.97); }
+.wb-tool:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.wb-tool-primary { animation: wb-breathe 3.2s ease-in-out infinite; }
+.wb-tool-primary:hover { animation-play-state: paused; }
+.wb-toolbar {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap;
+  gap: 6px; padding: 5px; max-width: 100%;
+  border-radius: 12px; border: 1px solid var(--dsw-alias-border-l1);
+  background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.10));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 8px 22px rgba(0,0,0,.16);
+}
 @media (prefers-reduced-motion: reduce) {
   .wb-card, .wb-card:hover { transition: none; transform: none; }
   .wb-edge, .wb-card-active { animation: none !important; }
+  .wb-tool, .wb-tool-primary { animation: none !important; transition: none; transform: none; }
 }
 `
 
@@ -712,6 +884,10 @@ window.__ModuleLoader__.load({
       }
       const sessions = () => service('sessions')
 
+      // The delivery session receives its own process as user turns: planning
+      // directives, wake reminders and host context. They are the machine's
+      // working state, not a conversation the owner had.
+      const INJECTED_USER = /^(?:You are the delivery lead|You have not submitted a plan|A new requirement was submitted|Updated instructions from:|<system-reminder>|Current runtime context|Time sampled while preparing)/
       const messageOf = entry => {
         const event = entry && entry.event
         if (!event || typeof event !== 'object') return null
@@ -722,6 +898,13 @@ window.__ModuleLoader__.load({
         if (!Array.isArray(blocks)) return null
         const text = blocks.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n').trim()
         if (text === '') return null
+        if (type === 'user/message') {
+          // Subagent relays, job exits and tool notices arrive as role "user"
+          // with a different source; they are not the owner speaking.
+          const source = data?.source
+          if (source !== undefined && source !== null && source.kind !== 'user') return null
+          if (INJECTED_USER.test(text)) return null
+        }
         return { role: type === 'user/message' ? 'user' : 'assistant', text }
       }
 
@@ -802,7 +985,26 @@ window.__ModuleLoader__.load({
           return api.using(id, { source: 'workbench' }, async ref => {
             const binding = await ref.ready
             const entries = binding?.eventSource?.getSnapshot?.()?.entries ?? []
-            return entries.map(messageOf).filter(Boolean).slice(-40)
+            // One answer per turn: narration between tool calls is the model's
+            // process, so only the last assistant text of a turn is shown.
+            const bubbles = []
+            let pendingAnswer = null
+            for (const entry of entries) {
+              const event = entry && entry.event
+              if (!event || typeof event !== 'object') continue
+              if (event.type === 'turn/start') { pendingAnswer = null; continue }
+              if (event.type === 'turn/end') {
+                if (pendingAnswer !== null) bubbles.push(pendingAnswer)
+                pendingAnswer = null
+                continue
+              }
+              const item = messageOf(entry)
+              if (item === null) continue
+              if (item.role === 'user') bubbles.push(item)
+              else pendingAnswer = item
+            }
+            if (pendingAnswer !== null) bubbles.push(pendingAnswer)
+            return bubbles.slice(-30)
           })
         },
         async send(id, text, images = []) {
@@ -1793,17 +1995,131 @@ window.__ModuleLoader__.load({
       fontSize: '13px',
     }
 
-    /** Jobs as cards: one planning run each, each with its own cockpit. */
+    /**
+     * Tasks as cards: one card per *task group* (a root task plus its change
+     * requests), so five fixes on one feature still read as one entry.
+     *
+     * The ledger keeps one immutable job per change — that is what preserves
+     * the audit chain — and only the presentation folds the chain. Every
+     * member stays one click away inside its group.
+     */
     function TaskList(props) {
       const { t, project, onBack, onOpenJob, onNewTask } = props
       const jobs = Array.isArray(project.jobs) ? project.jobs : []
-      const titleOf = id => (jobs.find(job => job.id === id) || {}).title || id
-      const childCount = id => jobs.filter(job => job.parentJobId === id).length
-      const statusOf = (job) => job.status === 'paused' ? t('statusPaused')
-        : job.status === 'cancelled' ? t('statusCancelled')
-        : job.status === 'done' ? t('boardDone')
-        : ((job.running || 0) === 0 && (job.progress ? job.progress.done < job.progress.total : true)) ? t('statusPlanned')
-        : t('statusRunning')
+      const byId = new Map(jobs.map(job => [job.id, job]))
+      // A change request names its parent; walk up to the root so a chain of
+      // changes still lands under the one card it came from.
+      const rootOf = job => {
+        let current = job
+        const seen = new Set()
+        while (typeof current.parentJobId === 'string' && current.parentJobId !== ''
+          && byId.has(current.parentJobId) && seen.has(current.id) === false) {
+          seen.add(current.id)
+          current = byId.get(current.parentJobId)
+        }
+        return current
+      }
+      const members = new Map()
+      for (const job of jobs) {
+        const root = rootOf(job)
+        if (members.has(root.id) === false) members.set(root.id, [])
+        members.get(root.id).push(job)
+      }
+      const groups = [...members.entries()]
+        .map(([rootId, list]) => {
+          const members = [...list].sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')) || a.id.localeCompare(b.id))
+          return {
+            root: byId.get(rootId),
+            list: members,
+            // A change in flight must not be hidden behind the root's "done".
+            active: members.filter(item => item.id !== rootId
+              && item.status !== 'done' && item.status !== 'cancelled' && item.status !== 'paused').length,
+          }
+        })
+        .sort((a, b) => String(a.root.createdAt ?? '').localeCompare(String(b.root.createdAt ?? '')) || a.root.id.localeCompare(b.root.id))
+      const statusOf = job => jobStatusOf(t, job)
+      const accentOf = job => job.status === 'done' ? STATUS_COLOR.done
+        : job.status === 'cancelled' ? STATUS_COLOR.blocked
+        : job.status === 'paused' ? STATUS_COLOR.waiting
+        : 'var(--dsw-alias-brand-primary)'
+      const cardOf = (job, groupSize, activeChanges) => {
+        const progress = job.progress || { done: 0, total: 0 }
+        const done = job.status === 'done'
+        const cancelled = job.status === 'cancelled'
+        const paused = job.status === 'paused'
+        const artifacts = Array.isArray(job.artifacts) ? job.artifacts : []
+        // Completed is a state, not a percentage: lead with the result instead
+        // of repeating "14/14 完成 · 已完成".
+        const accent = accentOf(job)
+        return h('button', {
+          key: job.id,
+          type: 'button',
+          className: 'wb-card wb-btn',
+          onClick: () => onOpenJob(job.id),
+          style: {
+            ...s.card,
+            textAlign: 'left', cursor: 'pointer', gap: '8px',
+            minHeight: '108px', justifyContent: 'space-between',
+            borderLeft: `3px solid ${accent}`,
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('span', {
+              style: {
+                width: '18px', height: '18px', borderRadius: '50%', flex: '0 0 auto',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '11px', fontWeight: 700,
+                color: done ? '#0d1017' : accent,
+                background: done ? accent : 'transparent',
+                border: `1px solid ${accent}`,
+              },
+            }, done ? '✓' : cancelled ? '✕' : paused ? '❚❚' : '●'),
+            h('span', {
+              style: {
+                ...s.stageName, fontSize: '14px', overflow: 'hidden', whiteSpace: 'normal',
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              },
+            }, job.title || job.id),
+            h('span', {
+              style: {
+                marginLeft: 'auto', flex: '0 0 auto', fontSize: '10px', letterSpacing: '.6px',
+                color: accent, textTransform: 'uppercase',
+              },
+            }, statusOf(job))),
+          job.requirement && !done
+            ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                h('span', {
+                  style: { ...s.badge, color: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)', borderColor: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)' },
+                }, job.planBy ? t('autoRunning') : t('autoPlanning')),
+                (job.gates || []).length
+                  ? h('span', { style: { ...s.badge, color: STATUS_COLOR.waiting, borderColor: STATUS_COLOR.waiting } }, t('autoWaiting'))
+                  : null)
+            : null,
+          groupSize > 1
+            ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                h('span', { style: s.badge }, t('taskFollowUps').replace('{n}', String(groupSize - 1))),
+                activeChanges > 0
+                  ? h('span', {
+                      style: { ...s.badge, color: 'var(--dsw-alias-brand-primary)', borderColor: 'var(--dsw-alias-brand-primary)' },
+                    }, `● ${activeChanges} ${t('statusRunning')}`)
+                  : null)
+            : null,
+          h('span', { style: { ...s.stageMeta, fontSize: '11px' } }, done
+            ? t('taskDoneMeta').replace('{items}', String(job.totals?.done ?? progress.done)).replace('{files}', String(artifacts.length))
+            : `${progress.done}/${progress.total} ${t('boardProgress')}${job.totals && job.totals.blocked ? ` · ${job.totals.blocked} ${t('boardBlocked')}` : ''}${(job.gates || []).length ? ` · ${job.gates.length} ${t('boardWaiting')}` : ''}`),
+          done
+            ? null
+            : h('div', { style: s.meter },
+                h('span', { style: { ...s.meterFill, background: accent, width: `${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%` } })),
+          (() => {
+            const tokens = (Number(job.tokens?.inputTokens) || 0) + (Number(job.tokens?.outputTokens) || 0)
+            if (tokens <= 0) return null
+            const cost = Number(job.costUsd) || 0
+            return h('span', { style: { ...s.stageMeta, fontSize: '11px' } },
+              `${tokens} ${t('tokensUsed')}${cost > 0 ? ` · $${cost.toFixed(4)}` : ''}`)
+          })(),
+          h('span', { style: { ...s.stageMeta, color: done ? accent : 'var(--dsw-alias-label-secondary)' } }, done ? t('taskOpenDone') : t('taskOpenCockpit')))
+      }
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
           h('button', {
@@ -1820,80 +2136,34 @@ window.__ModuleLoader__.load({
         h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' } },
           jobs.length === 0
             ? h(Empty, { text: t('jobsEmpty') })
-            : jobs.map(job => {
-                const progress = job.progress || { done: 0, total: 0 }
-                const done = job.status === 'done'
-                const cancelled = job.status === 'cancelled'
-                const paused = job.status === 'paused'
-                const artifacts = Array.isArray(job.artifacts) ? job.artifacts : []
-                // Completed is a state, not a percentage: lead with the result
-                // instead of repeating "14/14 完成 · 已完成".
-                const accent = done ? STATUS_COLOR.done : cancelled ? STATUS_COLOR.blocked : paused ? STATUS_COLOR.waiting : 'var(--dsw-alias-brand-primary)'
-                return h('button', {
-                  key: job.id,
-                  type: 'button',
-                  className: 'wb-card wb-btn',
-                  onClick: () => onOpenJob(job.id),
-                  style: {
-                    ...s.card,
-                    textAlign: 'left', cursor: 'pointer', gap: '8px',
-                    minHeight: '108px', justifyContent: 'space-between',
-                    borderLeft: `3px solid ${accent}`,
-                  },
-                },
-                  h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-                    h('span', {
-                      style: {
-                        width: '18px', height: '18px', borderRadius: '50%', flex: '0 0 auto',
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '11px', fontWeight: 700,
-                        color: done ? '#0d1017' : accent,
-                        background: done ? accent : 'transparent',
-                        border: `1px solid ${accent}`,
+            : groups.map(group => h('div', {
+                key: group.root.id,
+                style: { display: 'flex', flexDirection: 'column', gap: '6px' },
+              },
+                cardOf(group.root, group.list.length, group.active),
+                group.list.length > 1
+                  ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', paddingLeft: '2px' } },
+                      h('span', { style: { ...s.stageMeta, fontSize: '10px', letterSpacing: '.6px' } }, t('followUpsTitle')),
+                      group.list.filter(job => job.id !== group.root.id).map(job => h('button', {
+                        key: job.id,
+                        type: 'button',
+                        className: 'wb-btn',
+                        onClick: () => onOpenJob(job.id),
+                        title: job.title || job.id,
+                        style: {
+                          // A change reads as a row in the group list, not as a
+                          // second card: no pill border, full width, 32px tall.
+                          display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                          minHeight: '32px', padding: '2px 6px', cursor: 'pointer', textAlign: 'left',
+                          font: 'inherit', color: 'var(--dsw-alias-label-secondary)',
+                          background: 'transparent', border: '1px solid transparent', borderRadius: '8px',
+                        },
                       },
-                    }, done ? '✓' : cancelled ? '✕' : paused ? '❚❚' : '●'),
-                    h('span', {
-                      style: {
-                        ...s.stageName, fontSize: '14px', overflow: 'hidden', whiteSpace: 'normal',
-                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-                      },
-                    }, job.title || job.id),
-                    h('span', {
-                      style: {
-                        marginLeft: 'auto', flex: '0 0 auto', fontSize: '10px', letterSpacing: '.6px',
-                        color: accent, textTransform: 'uppercase',
-                      },
-                    }, statusOf(job))),
-                  job.requirement && !done
-                    ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-                        h('span', {
-                          style: { ...s.badge, color: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)', borderColor: accent === STATUS_COLOR.done ? accent : 'var(--dsw-alias-brand-primary)' },
-                        }, job.planBy ? t('autoRunning') : t('autoPlanning')),
-                        (job.gates || []).length
-                          ? h('span', { style: { ...s.badge, color: STATUS_COLOR.waiting, borderColor: STATUS_COLOR.waiting } }, t('autoWaiting'))
-                          : null)
-                    : null,
-                  (job.parentJobId || childCount(job.id) > 0)
-                    ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-                        job.parentJobId ? h('span', { style: s.badge }, `${t('taskFrom')} ${titleOf(job.parentJobId)}`) : null,
-                        childCount(job.id) > 0 ? h('span', { style: s.badge }, t('taskFollowUps').replace('{n}', String(childCount(job.id)))) : null)
-                    : null,
-                  h('span', { style: { ...s.stageMeta, fontSize: '11px' } }, done
-                    ? t('taskDoneMeta').replace('{items}', String(job.totals?.done ?? progress.done)).replace('{files}', String(artifacts.length))
-                    : `${progress.done}/${progress.total} ${t('boardProgress')}${job.totals && job.totals.blocked ? ` · ${job.totals.blocked} ${t('boardBlocked')}` : ''}${(job.gates || []).length ? ` · ${job.gates.length} ${t('boardWaiting')}` : ''}`),
-                  done
-                    ? null
-                    : h('div', { style: s.meter },
-                        h('span', { style: { ...s.meterFill, background: accent, width: `${progress.total === 0 ? 0 : Math.round((progress.done / progress.total) * 100)}%` } })),
-                  (() => {
-                    const tokens = (Number(job.tokens?.inputTokens) || 0) + (Number(job.tokens?.outputTokens) || 0)
-                    if (tokens <= 0) return null
-                    const cost = Number(job.costUsd) || 0
-                    return h('span', { style: { ...s.stageMeta, fontSize: '11px' } },
-                      `${tokens} ${t('tokensUsed')}${cost > 0 ? ` · $${cost.toFixed(4)}` : ''}`)
-                  })(),
-                  h('span', { style: { ...s.stageMeta, color: done ? accent : 'var(--dsw-alias-label-secondary)' } }, done ? t('taskOpenDone') : t('taskOpenCockpit')))
-              })))
+                        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', flex: '0 0 auto', background: accentOf(job) } }),
+                        h('span', { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, job.title || job.id),
+                        h('span', { style: { fontSize: '10px', color: 'var(--dsw-alias-label-secondary)', flex: '0 0 auto' } }, statusOf(job)),
+                        h('span', { style: { fontSize: '10px', color: 'var(--dsw-alias-label-secondary)', flex: '0 0 auto' } }, `${(job.progress || {}).done ?? 0}/${(job.progress || {}).total ?? 0}`))))
+                  : null))))
     }
 
     /**
@@ -1986,6 +2256,101 @@ window.__ModuleLoader__.load({
         const timer = setInterval(load, 3000)
         return () => clearInterval(timer)
       }, [job.sessionId, load])
+
+      // Voice input: the browser records, the host transcribes (it owns the
+      // recognizer and its model), and the text lands in the draft exactly like
+      // typing — never sent on its own.
+      const [recording, setRecording] = useState(false)
+      const [transcribing, setTranscribing] = useState(false)
+      const recorderRef = useRef(null)
+      const streamRef = useRef(null)
+      const chunksRef = useRef([])
+
+      const releaseStream = useCallback(() => {
+        const stream = streamRef.current
+        streamRef.current = null
+        if (stream && typeof stream.getTracks === 'function') {
+          for (const track of stream.getTracks()) {
+            try { track.stop() } catch { /* already gone */ }
+          }
+        }
+      }, [])
+      useEffect(() => () => { releaseStream() }, [releaseStream])
+
+      const transcribeBlob = useCallback(async blob => {
+        setTranscribing(true)
+        setError(null)
+        try {
+          const audio = await voiceWavBase64(blob)
+          const response = await fetch('/workbench/transcribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ audio }),
+          })
+          const body = await response.json().catch(() => null)
+          if (!response.ok) {
+            throw new Error(body?.error?.code === 'speech-unavailable'
+              ? t('voiceUnavailable')
+              : (body?.error?.message ?? `HTTP ${response.status}`))
+          }
+          const text = String(body?.text ?? '').trim()
+          if (text === '') { setError(t('voiceEmpty')); return }
+          setDraft(current => (current === '' ? text : `${current} ${text}`))
+        } catch (failure) {
+          setError(String(failure?.message ?? failure))
+        } finally {
+          setTranscribing(false)
+        }
+      }, [t])
+
+      const toggleVoice = useCallback(async () => {
+        if (transcribing) return
+        if (recording) {
+          recorderRef.current?.stop()
+          return
+        }
+        const media = typeof navigator !== 'undefined' ? navigator.mediaDevices : null
+        const Recorder = typeof window !== 'undefined' ? window.MediaRecorder : null
+        if (!media || typeof media.getUserMedia !== 'function' || !Recorder) {
+          setError(t('voiceUnsupported'))
+          return
+        }
+        try {
+          const stream = await media.getUserMedia({ audio: { channelCount: 1 } })
+          streamRef.current = stream
+          const recorder = new Recorder(stream)
+          chunksRef.current = []
+          recorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) chunksRef.current.push(event.data)
+          }
+          recorder.onstop = () => {
+            releaseStream()
+            const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
+            chunksRef.current = []
+            recorderRef.current = null
+            setRecording(false)
+            if (blob.size > 0) transcribeBlob(blob)
+          }
+          recorder.start()
+          recorderRef.current = recorder
+          setRecording(true)
+        } catch (failure) {
+          releaseStream()
+          setError(String(failure?.message ?? failure))
+        }
+      }, [recording, transcribing, releaseStream, transcribeBlob, t])
+
+      // The owner's ask first, then the answers: the requirement travels through
+      // the intake route, never through this chat, so it would otherwise be
+      // missing from the conversation the panel shows.
+      const thread = (() => {
+        const ask = String(job.brief ?? (job.requirement && job.requirement.text) ?? '').trim()
+        if (ask === '') return messages
+        const first = messages[0]
+        if (first !== undefined && first.role === 'user' && first.text.startsWith(ask.slice(0, 40))) return messages
+        return [{ role: 'user', text: ask }, ...messages]
+      })()
 
       // Follow the tail: a transcript that opens at the top of an old message
       // is the wrong place to be when you are watching work happen.
@@ -2106,19 +2471,19 @@ window.__ModuleLoader__.load({
           h(Empty, { text: t('convoNone') }),
           h('div', { style: { display: 'flex', gap: '6px' } },
             h('button', { type: 'button', className: 'wb-btn', disabled: busy, style: { ...s.button, padding: '6px 12px' }, onClick: startNew }, busy ? t('convoSending') : t('convoNew')),
-            h('button', { type: 'button', className: 'wb-btn', style: { ...s.badge, cursor: 'pointer' }, onClick: pick }, t('convoBind'))))
+            h('button', { type: 'button', className: 'wb-btn wb-tool', style: { ...s.tool, minHeight: '30px', padding: '0 10px', fontSize: '12px' }, onClick: pick }, t('convoBind'))))
       } else {
         body = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', flex: '1 1 auto', minHeight: 0 } },
           h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-            h('button', { type: 'button', className: 'wb-btn', style: { ...subtleButton, height: '26px', fontSize: '11px' }, onClick: () => bridge.open(job.sessionId).catch(failure => setError(String(failure?.message ?? failure))) }, t('convoInDsh')),
-            h('button', { type: 'button', className: 'wb-btn', style: { ...subtleButton, height: '26px', fontSize: '11px' }, onClick: pick }, t('convoBind')),
-            h('button', { type: 'button', className: 'wb-btn', style: { ...subtleButton, height: '26px', fontSize: '11px' }, onClick: () => onConfig({ sessionId: null }) }, t('convoUnbind'))),
+            h('button', { type: 'button', className: 'wb-btn wb-tool', style: { ...s.tool, minHeight: '30px', padding: '0 10px', fontSize: '12px' }, onClick: () => bridge.open(job.sessionId).catch(failure => setError(String(failure?.message ?? failure))) }, t('convoInDsh')),
+            h('button', { type: 'button', className: 'wb-btn wb-tool', style: { ...s.tool, minHeight: '30px', padding: '0 10px', fontSize: '12px' }, onClick: pick }, t('convoBind')),
+            h('button', { type: 'button', className: 'wb-btn wb-tool', style: { ...s.tool, minHeight: '30px', padding: '0 10px', fontSize: '12px' }, onClick: () => onConfig({ sessionId: null }) }, t('convoUnbind'))),
           h('div', { ref: transcriptRef, style: { flex: '1 1 auto', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '0px', scrollBehavior: 'smooth' } },
-            loading && messages.length === 0
+            loading && thread.length === 0
               ? h(Empty, { text: t('convoLoading') })
-              : messages.length === 0
+              : thread.length === 0
                 ? h(Empty, { text: t('convoEmpty') })
-                : messages.map((message, index) => h('div', {
+                : thread.map((message, index) => h('div', {
                     key: `${index}-${message.role}`,
                     style: {
                       fontSize: '11px', lineHeight: '1.6', padding: '6px 8px', borderRadius: '8px',
@@ -2171,6 +2536,16 @@ window.__ModuleLoader__.load({
                 if (files.some(file => String(file.type).startsWith('image/'))) { event.preventDefault(); addFiles(files) }
               },
             }),
+            h('button', {
+              type: 'button', className: 'wb-btn',
+              title: recording ? t('voiceStop') : transcribing ? t('voiceTranscribing') : t('voiceStart'),
+              disabled: busy || transcribing,
+              style: {
+                ...subtleButton, height: '32px', minWidth: '34px',
+                ...(recording ? { color: 'var(--dsw-alias-state-error-primary)', borderColor: 'var(--dsw-alias-state-error-primary)' } : {}),
+              },
+              onClick: toggleVoice,
+            }, recording ? '⏹' : transcribing ? '…' : '🎤'),
             h('button', { type: 'button', className: 'wb-btn', disabled: busy, style: { ...s.button, padding: '6px 12px' }, onClick: send }, busy ? t('convoSending') : t('convoSend'))))
       }
 
@@ -2303,7 +2678,7 @@ window.__ModuleLoader__.load({
      * person, then progress, then the detail you only read occasionally.
      */
     function ProjectDetail(props) {
-      const { t, project, job, summary: rawSummary, events: rawEvents, onBack, backLabel, onControl, onDecide, bridge, onJobConfig } = props
+      const { t, project, job, summary: rawSummary, events: rawEvents, onBack, backLabel, onControl, onDecide, bridge, onJobConfig, onOpenJob } = props
       // The cockpit belongs to one job; a legacy project without jobs renders
       // with the project itself as the scope.
       const scope = job || project
@@ -2364,13 +2739,16 @@ window.__ModuleLoader__.load({
         }
         setBusy(true)
         try {
-          const response = await fetch('/workbench/start', {
+          // Every submission — a new task or a change request on a delivered
+          // one — opens a job through the closed-loop intake, so the same
+          // planning budget, dispatch loop and accounting apply to both.
+          const response = await fetch('/workbench/requirements', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             credentials: 'same-origin',
             body: JSON.stringify({
-              requirement: brief.trim(),
               projectId: project.id,
+              text: brief.trim(),
               ...(followUp ? { parentJobId: followUp.id, kind } : {}),
             }),
           })
@@ -2379,6 +2757,9 @@ window.__ModuleLoader__.load({
           setStarted(true)
           setBrief('')
           setDialogOpen(false)
+          // Land on the new task instead of staying on the parent: its cockpit
+          // is where the plan cards and the live progress appear.
+          if (typeof body?.jobId === 'string' && body.jobId !== '') onOpenJob?.(body.jobId)
         } catch (error) {
           setDraftError(String(error?.message ?? error))
         } finally {
@@ -2553,11 +2934,60 @@ window.__ModuleLoader__.load({
         { id: 'deliverables', title: t('deliverableTitle'), node: deliverablesNode, accent: 'var(--dsw-alias-label-secondary)', defaultCollapsed: true, summary: `${artifacts.length}` },
       ]
 
+      // The cockpit belongs to one job in a chain: show where it sits and let
+      // the user step to an ancestor or a sibling change without leaving it.
+      const groupById = new Map((project.jobs || []).map(item => [item.id, item]))
+      const chain = []
+      if (job !== null && job !== undefined) {
+        let current = job
+        const seen = new Set()
+        while (current !== null && current !== undefined) {
+          chain.unshift(current)
+          if (typeof current.parentJobId !== 'string' || current.parentJobId === '' || seen.has(current.id)) break
+          seen.add(current.id)
+          current = groupById.get(current.parentJobId) ?? null
+        }
+      }
+      const followUps = job === null || job === undefined
+        ? []
+        : (project.jobs || []).filter(item => item.parentJobId === job.id)
+      const groupLine = job !== null && job !== undefined && (chain.length > 1 || followUps.length > 0)
+        ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+            h('span', { style: { ...s.stageMeta, fontSize: '11px' } }, t('taskGroupLabel')),
+            ...(chain.length > 1
+              ? chain.flatMap((node, index) => {
+                  const last = index === chain.length - 1
+                  const chip = last
+                    ? h('span', { key: `chain-${node.id}`, style: { ...s.tool, ...s.toolActive, cursor: 'default' } }, node.title || node.id)
+                    : h('button', {
+                        key: `chain-${node.id}`, type: 'button', className: 'wb-btn wb-tool',
+                        style: { ...s.tool, padding: '0 10px' },
+                        onClick: () => onOpenJob?.(node.id),
+                      }, node.title || node.id)
+                  return last ? [chip] : [chip, h('span', { key: `arrow-${node.id}`, style: { ...s.stageMeta } }, '›')]
+                })
+              : []),
+            followUps.length > 0
+              ? [h('span', { key: 'follow-ups', style: { ...s.stageMeta, fontSize: '11px', marginLeft: '6px' } }, t('followUpsTitle')),
+                 ...followUps.map(child => h('button', {
+                   key: `follow-${child.id}`, type: 'button', className: 'wb-btn wb-tool',
+                   style: { ...s.tool, padding: '0 10px' },
+                   onClick: () => onOpenJob?.(child.id),
+                 }, [
+                   h('span', { key: 'title', style: { maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis' } }, child.title || child.id),
+                   h('span', {
+                     key: 'meta',
+                     style: { fontSize: '10px', fontWeight: 500, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
+                   }, `${jobStatusOf(t, child)}${jobProgressText(child) === '' ? '' : ` · ${jobProgressText(child)}`}`),
+                 ]))]
+              : [])
+        : null
+
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative', flex: '1 1 auto', minHeight: 0 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
           h('button', {
-            type: 'button', className: 'wb-btn',
-            style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+            type: 'button', className: 'wb-btn wb-tool',
+            style: { ...s.tool, padding: '0 10px' },
             onClick: onBack,
           }, backLabel || t('backToCards')),
           h('span', { style: { ...s.title, fontSize: '18px' } },
@@ -2565,7 +2995,9 @@ window.__ModuleLoader__.load({
           h('span', {
             style: {
               ...s.badge,
-              color: scopeStatus === 'paused' ? STATUS_COLOR.waiting : scopeStatus === 'cancelled' ? STATUS_COLOR.blocked : 'var(--dsw-alias-label-secondary)',
+              // Muted gray on a dark chip was the blur; the status must read.
+              color: scopeStatus === 'paused' ? STATUS_COLOR.waiting : scopeStatus === 'cancelled' ? STATUS_COLOR.blocked : 'var(--dsw-alias-label-primary)',
+              fontWeight: 600, letterSpacing: '.2px', borderColor: 'var(--dsw-alias-border-l2)',
             },
           }, statusChip),
           running > 0
@@ -2573,53 +3005,54 @@ window.__ModuleLoader__.load({
                 style: { ...s.badge, color: STATUS_COLOR.done, borderColor: STATUS_COLOR.done, animation: 'wb-glow 1.4s ease-in-out infinite' },
               }, `● ${t('boardLive')} ${running}`)
             : null,
-          h('div', { style: { marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('div', { className: 'wb-toolbar', style: { marginLeft: 'auto' } },
             h('button', {
-              type: 'button', className: 'wb-btn',
-              style: {
-                ...subtleButton, minHeight: '32px',
-                ...(railsOpen ? { color: 'var(--dsw-alias-label-primary)', borderColor: 'var(--dsw-alias-brand-primary)' } : { color: 'var(--dsw-alias-label-secondary)' }),
-              },
+              type: 'button', className: 'wb-btn wb-tool',
+              style: { ...s.tool, ...(railsOpen ? s.toolActive : {}) },
               onClick: toggleRails,
             }, `▤ ${railsOpen ? t('panelsHide') : t('panelsToggle')}`),
-            job && scopeStatus !== 'done' && progress.done < progress.total
+            // A manual kick exists only for a job the loop does not drive (a
+            // legacy plan with no requirement). Intake jobs are dispatched by
+            // the closed loop, and a manual round here would race it and spawn
+            // duplicate children — the conversation panel is still available.
+            job && !job.requirement && scopeStatus !== 'done' && progress.done < progress.total
               ? h('button', {
-                  type: 'button', className: 'wb-btn wb-primary',
+                  type: 'button', className: 'wb-btn wb-tool wb-tool-primary',
                   disabled: execBusy,
-                  style: { ...s.button, padding: '6px 14px' },
+                  style: { ...s.tool, ...s.toolPrimary, opacity: execBusy ? 0.6 : 1 },
                   onClick: startExecution,
                 }, execBusy ? t('convoSending') : `▶ ${t('execStart')}`)
               : null,
             job
               ? h('button', {
-                  type: 'button', className: 'wb-btn',
-                  style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center', ...(job.sessionId ? { color: STATUS_COLOR.done, borderColor: STATUS_COLOR.done } : {}) },
+                  type: 'button', className: 'wb-btn wb-tool',
+                  style: { ...s.tool },
                   onClick: () => setChatOpen(!convoOpen),
                 }, `💬 ${convoOpen ? t('convoOpen') : t('convoClosed')}`)
               : null,
             job
               ? h('button', {
-                  type: 'button', className: 'wb-btn',
-                  style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+                  type: 'button', className: 'wb-btn wb-tool',
+                  style: { ...s.tool },
                   onClick: () => setWorkspaceOpen(true),
                 }, `📁 ${t('workspaceButton')}`)
               : null,
             scopeStatus === 'paused'
               ? h('button', {
-                  type: 'button', className: 'wb-btn',
-                  style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+                  type: 'button', className: 'wb-btn wb-tool',
+                  style: { ...s.tool, ...s.toolWarn },
                   onClick: async () => { setControlling(true); try { await onControl?.('resume') } finally { setControlling(false) } },
                   disabled: controlling,
                 }, t('resumeRun'))
               : h('button', {
-                  type: 'button', className: 'wb-btn',
-                  style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+                  type: 'button', className: 'wb-btn wb-tool',
+                  style: { ...s.tool, ...s.toolWarn },
                   onClick: async () => { setControlling(true); try { await onControl?.('pause') } finally { setControlling(false) } },
                   disabled: controlling || scopeStatus === 'cancelled',
                 }, t('pauseRun')),
             h('button', {
-              type: 'button', className: 'wb-btn',
-              style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center', color: STATUS_COLOR.blocked },
+              type: 'button', className: 'wb-btn wb-tool',
+              style: { ...s.tool, ...s.toolDanger },
               onClick: async () => {
                 if (typeof window !== 'undefined' && typeof window.confirm === 'function' && !window.confirm(t('cancelConfirm'))) return
                 setControlling(true)
@@ -2629,8 +3062,8 @@ window.__ModuleLoader__.load({
             }, t('cancelRun')),
             job && scopeStatus === 'done'
               ? h('button', {
-                  type: 'button', className: 'wb-btn wb-primary',
-                  style: { ...s.button, padding: '6px 14px' },
+                  type: 'button', className: 'wb-btn wb-tool wb-tool-primary',
+                  style: { ...s.tool, ...s.toolPrimary, padding: '0 14px' },
                   onClick: () => {
                     setDraftError(null)
                     setFollowUp(job)
@@ -2640,10 +3073,11 @@ window.__ModuleLoader__.load({
                   },
                 }, `＋ ${t('followUp')}`)
               : h('button', {
-                  type: 'button', className: 'wb-btn',
-                  style: { ...s.button, padding: '6px 14px' },
+                  type: 'button', className: 'wb-btn wb-tool wb-tool-primary',
+                  style: { ...s.tool, ...s.toolPrimary, padding: '0 14px' },
                   onClick: () => { setDraftError(null); setFollowUp(null); setBrief(''); setDialogOpen(true) },
                 }, `＋ ${t('taskEntryTitle')}`))),
+        groupLine,
         started ? h('p', { style: s.muted }, t('taskStarted')) : null,
         execNotice ? h('p', { style: { ...s.stageMeta, color: 'var(--dsw-alias-label-secondary)' } }, execNotice) : null,
 
@@ -2806,16 +3240,40 @@ window.__ModuleLoader__.load({
       const panelRef = useRef(null)
       // A modal owes the user three things: it is announced, focus stays inside
       // it, and focus returns to the control that opened it.
+      //
+      // The open + initial-focus half must run ONCE per dialog. `onCancel` is an
+      // inline callback, so an effect keyed on it re-runs after every
+      // keystroke; while it also called focus() that pulled focus out of the
+      // textarea after the first character (the change-request dialog puts its
+      // type buttons before the field). Keep the focus trap in its own effect
+      // that may re-run safely.
       useEffect(() => {
         if (typeof document === 'undefined') return undefined
         const previous = document.activeElement
+        const body = document.body
+        const previousOverflow = body.style.overflow
+        body.style.overflow = 'hidden'
+        const panel = panelRef.current
+        const controls = () => panel === null
+          ? []
+          : [...panel.querySelectorAll('button, input, textarea, select, a[href]')]
+            .filter(el => el.disabled !== true && el.offsetParent !== null)
+        // Prefer the field the user came here to fill over the first button.
+        const field = panel === null ? null : panel.querySelector('textarea, input, select')
+        const target = field !== null && field.disabled !== true ? field : controls()[0]
+        if (target !== undefined && target !== null && typeof target.focus === 'function') target.focus()
+        return () => {
+          body.style.overflow = previousOverflow
+          if (previous !== null && typeof previous.focus === 'function') previous.focus()
+        }
+      }, [])
+      useEffect(() => {
+        if (typeof document === 'undefined') return undefined
         const panel = panelRef.current
         const focusables = () => panel === null
           ? []
           : [...panel.querySelectorAll('button, input, textarea, select, a[href]')]
             .filter(el => el.disabled !== true && el.offsetParent !== null)
-        const first = focusables()[0]
-        if (first !== undefined && typeof first.focus === 'function') first.focus()
         const onKey = event => {
           if (event.key === 'Escape') {
             event.preventDefault?.()
@@ -2835,14 +3293,7 @@ window.__ModuleLoader__.load({
           }
         }
         window.addEventListener('keydown', onKey)
-        const body = document.body
-        const previousOverflow = body.style.overflow
-        body.style.overflow = 'hidden'
-        return () => {
-          window.removeEventListener('keydown', onKey)
-          body.style.overflow = previousOverflow
-          if (previous !== null && typeof previous.focus === 'function') previous.focus()
-        }
+        return () => window.removeEventListener('keydown', onKey)
       }, [onCancel])
       return h('div', {
         style: {
@@ -3215,6 +3666,7 @@ window.__ModuleLoader__.load({
               onDecide: decideGate,
               bridge,
               onJobConfig: saveJobConfig,
+              onOpenJob: id => { setJobId(id); setTasksOpen(false) },
             }),
             dialog)
         }

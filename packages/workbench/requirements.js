@@ -19,6 +19,12 @@ export const REQUIREMENT_LIMITS = {
   maxTitle: 80,
 }
 
+/**
+ * The three change kinds the panel offers on a delivered task. They travel
+ * with the requirement so the new job records *why* it points at its parent.
+ */
+export const REQUEST_KINDS = ['change', 'fix', 'feature']
+
 export class RequirementError extends Error {
   constructor(issues) {
     const list = Array.isArray(issues) && issues.length > 0 ? issues : ['invalid requirement']
@@ -72,14 +78,23 @@ function decodeFile(file) {
 }
 
 /**
- * Validate and normalize one submission: `{ projectId, title?, text?, file? }`.
- * Returns every issue at once, like the planner, so one round-trip fixes them.
+ * Validate and normalize one submission: `{ projectId, title?, text?, file?,
+ * parentJobId?, kind? }`. Returns every issue at once, like the planner, so
+ * one round-trip fixes them.
  */
 export function normalizeRequirement(input) {
   const source = input !== null && typeof input === 'object' ? input : {}
   const issues = []
   const projectId = normalizeText(source.projectId)
   if (projectId === '') issues.push('projectId is required')
+
+  // A change request names the delivered job it follows and picks one kind.
+  // Both are optional: a plain new task has neither.
+  const parentJobId = normalizeText(source.parentJobId)
+  const kind = normalizeText(source.kind)
+  if (kind !== '' && !REQUEST_KINDS.includes(kind)) {
+    issues.push(`kind must be one of ${REQUEST_KINDS.join('/')}`)
+  }
 
   const pasted = normalizeText(source.text)
   let uploaded = null
@@ -111,6 +126,8 @@ export function normalizeRequirement(input) {
       file: uploaded === null
         ? null
         : { name: uploaded.name, extension: uploaded.extension, bytes: uploaded.bytes },
+      ...(parentJobId === '' ? {} : { parentJobId }),
+      ...(kind === '' ? {} : { kind }),
     },
   }
 }
@@ -137,7 +154,7 @@ export async function storeRequirement(dataDir, jobId, requirement) {
   const header = [
     `# ${requirement.title}`,
     '',
-    `<!-- project: ${requirement.projectId} · job: ${jobId} · source: ${requirement.source} -->`,
+    `<!-- project: ${requirement.projectId} · job: ${jobId} · source: ${requirement.source}${typeof requirement.parentJobId === 'string' ? ` · follow-up: ${requirement.parentJobId} (${requirement.kind ?? 'change'})` : ''} -->`,
     '',
   ].join('\n')
   await writeFile(target, `${header}${requirement.text}\n`, 'utf8')
@@ -157,12 +174,26 @@ export function planningDirective({ project, job, requirement, requirementFile =
   ]
   if (requirementFile !== null) lines.push('', `Source document: ${requirementFile} (read it if you need the full formatting).`)
   if (job.workspace) lines.push('', `Workspace: ${job.workspace}`)
+  if (typeof job.parentJobId === 'string' && job.parentJobId !== '') {
+    const parent = typeof job.parentTitle === 'string' && job.parentTitle !== '' ? ` ("${job.parentTitle}")` : ''
+    const what = job.kind === 'fix' ? 'bug-fix follow-up' : job.kind === 'feature' ? 'feature follow-up' : 'change request'
+    lines.push(
+      '',
+      `This is a ${what} on job ${job.parentJobId}${parent}: change that delivered result in place,`,
+      'do not rebuild its whole scope, and leave every file the change does not need untouched.',
+    )
+  }
   lines.push(
     '',
     'Do this in this turn:',
-    '1. Understand the requirement. Load the planning/PRD/architecture/domain skills this session offers.',
-    '   If a skill you need is missing, call workbench_find_skill to search the session catalog and the plugin market.',
-    '2. Inspect the workspace before planning; do not invent an existing structure.',
+    '1. Understand the requirement from its text plus a quick look at the workspace (do not invent an',
+    '   existing structure). Start from SCAFFOLD.md / README.md when the workspace has one instead of',
+    '   walking the tree. Budget this turn: at most 10 tool calls / about 3 minutes before you submit.',
+    '   Do not read the whole repository, reproduce the bug, or run the test suite here — that is what',
+    '   the cards are for. Loading a planning/PRD/architecture/domain skill is fine; if a skill you need',
+    '   is missing, call workbench_find_skill to search the session catalog and the plugin market.',
+    '2. If the requirement needs root-cause work, put a diagnose card in the plan (owner backend, stage',
+    "   build) instead of investigating during planning. Do not do a card's job in this turn.",
     '3. Produce ONE plan and submit it with workbench_submit_plan:',
     `   workbench_submit_plan({ jobId: ${JSON.stringify(job.jobId)}, brief, roles?, design?, tasks: [{ id, title, owner, stage, blockedBy?, instructions?, acceptance?, skill? }] })`,
     '   Rules: ids are unique inside the plan; blockedBy only references ids in this plan; at least one',
@@ -171,6 +202,9 @@ export function planningDirective({ project, job, requirement, requirementFile =
     '4. Do not implement the plan yourself and do not report completion: child agents execute the',
     '   cards and the plugin derives done from their test evidence.',
     'If workbench_submit_plan rejects the plan, fix every reported issue and resubmit.',
+    'If the requirement is still unclear when the budget is spent, submit the best plan you can defend',
+    'and put the unknowns into the card instructions. A long planning turn costs the loop more than a',
+    'diagnose card that answers the same question in public.',
   )
   return lines.join('\n')
 }

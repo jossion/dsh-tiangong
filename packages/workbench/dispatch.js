@@ -28,9 +28,18 @@ function nowIso(now) {
 
 /** The message that starts one planning round in the delivery session. */
 export function planningText({ project, job, requirement }) {
+  const parent = typeof job.parentJobId === 'string' && job.parentJobId !== ''
+    ? (project?.jobs ?? []).find(item => item.id === job.parentJobId) ?? null
+    : null
   return planningDirective({
     project,
-    job: { jobId: job.id, workspace: job.workspace ?? null },
+    job: {
+      jobId: job.id,
+      workspace: job.workspace ?? null,
+      ...(typeof job.parentJobId === 'string' && job.parentJobId !== '' ? { parentJobId: job.parentJobId } : {}),
+      ...(typeof job.kind === 'string' && job.kind !== '' ? { kind: job.kind } : {}),
+      ...(parent !== null && typeof parent.title === 'string' && parent.title !== '' ? { parentTitle: parent.title } : {}),
+    },
     requirement: {
       text: requirement.text,
       title: requirement.title ?? null,
@@ -54,6 +63,8 @@ export function wakeText({ job, work }) {
     '4. repeat until workbench_next_work returns no work, then stop and summarize in one paragraph',
     '',
     'Do not implement cards yourself and never mark a card done without test evidence.',
+    'Do not run the project test suite yourself and do not wait on long test commands: the child',
+    'agent runs its own tests and reports the exit code, pass count and failures.',
     'An irreversible action stays for the human gate; keep working the other cards.',
   ].join('\n')
 }
@@ -137,9 +148,9 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
     }
   }
 
-  async function wakeJob(project, job, text, { mode }) {
+  async function wakeJob(project, job, text, { mode, deliver }) {
     const facts = factsOf(runtime, job.id)
-    const result = await sessions.wake(job.sessionId, text)
+    const result = await sessions.wake(job.sessionId, text, { deliver })
     facts.lastWakeAt = now()
     facts.rounds += 1
     if (mode === 'dispatch' && result.ok === true) {
@@ -248,9 +259,12 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
             facts.planNudges = 1
             await wakeJob(project, job, [
               `You have not submitted a plan for job ${job.id} yet.`,
-              'Call workbench_submit_plan now: one DAG of work items (id, title, owner, stage, blockedBy).',
+              'Stop exploring now and call workbench_submit_plan with the plan you can defend:',
+              'one DAG of work items (id, title, owner, stage, blockedBy).',
+              'If the root cause is still unknown, make it a diagnose card instead of investigating further.',
               'Do not implement anything and do not reply with prose only.',
-            ].join('\n'), { mode: 'plan-nudge' })
+              'If the plan is already submitted, ignore this reminder.',
+            ].join('\n'), { mode: 'plan-nudge', deliver: 'steer' })
           }
         }
         return

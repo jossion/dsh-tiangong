@@ -2,22 +2,27 @@
 
 A **requirement-to-delivery workbench** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`).
 
-Create an app (or a project), describe what you need or attach a requirement document, and the
-workbench runs the loop: it understands the requirement, plans a task graph, dispatches child
-agents, verifies their test evidence, and records the delivery — with as little manual
-intervention as possible. Every task stays bound to its own DSH session.
+Create a project, describe what you need or attach a requirement document, and the workbench runs the
+loop: it binds a delivery session, has the main agent plan a validated task graph, dispatches child
+agents per card, gates completion on real test evidence, and records the whole thing in an append-only
+ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
+> Capability inventory below is current as of **2026-11-04** (workbench `0.2.0`).
+> 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
+
 ## What it does
 
-- **Requirement intake** — paste text or attach a `.md` / `.markdown` / `.txt` document (≤512 KiB) right in the panel.
-- **Planning as a contract** — the agent submits a validated DAG (owners, stages, dependencies, acceptance criteria); invalid plans are rejected with the exact reason.
-- **Dispatch loop** — one ready work item at a time goes to a child agent, gets woken when it stalls, and its result is reported back with test evidence.
-- **Evidence-gated completion** — a work item is done only with a real exit code, a positive pass count and zero failures; otherwise it becomes a person's decision.
-- **Per-project delivery session** — each project gets a durable DSH session; the ledger records the binding, the model and the agent preset.
-- **Task cockpit** — team graph, task list, decisions, usage and delivery artifacts for every job.
-- **Automatic accounting** — token usage and cost per job, budgets, stall watchdog and round trip-breakers, with human gates on the exceptions.
+- **Requirement intake** — paste text or attach `.md` / `.markdown` / `.txt` (≤512 KiB; text ≤20 000 chars) right in the panel. A change request can name the delivered job it follows.
+- **Planning as a contract** — the main agent submits a validated DAG (`workbench_submit_plan`) with owners, stages, dependencies and acceptance criteria; invalid plans are rejected with every issue at once.
+- **Dispatch loop** — one round at a time: ready cards go to child agents with a complete prompt, results come back through `workbench_report_work`.
+- **Evidence-gated completion** — a card is done only with a real exit code, a positive pass count and zero failures; anything else lands on a person.
+- **Task groups, not card sprawl** — a delivered task and its change requests render as one root card plus its changes; the ledger still keeps one immutable job per change.
+- **Cockpit** — team graph, stage rail, HUD panels (progress / stages / tasks / gates / decisions / deliverables), live status, pause/resume/cancel, usage, workspace and conversation.
+- **Conversation that hides the process** — the panel shows your requirement and the final answer of each turn, not planning directives, tool calls or subagent notices.
+- **Voice input** — record in the browser, transcribe on the host through DSH's shared speech-to-text service, insert the text into the draft.
+- **Automatic accounting and circuit breakers** — tokens per job, optional USD budget, stall watchdog, round trip-breaker and a hard planning timeout, each exception as a human gate.
 
 | Requirement upload | Team flow |
 |---|---|
@@ -25,64 +30,219 @@ intervention as possible. Every task stays bound to its own DSH session.
 
 ![Task session chat](docs/assets/chat.png)
 
+## The closed loop
+
+The plugin is the scheduler; the main agent decides; child agents execute. Every tick is one pure
+decision (`orchestrator.nextStep`), and the ledger is the only source of truth.
+
+| Action | When | Who acts |
+|---|---|---|
+| `bind-session` | a job has no delivery session | host: create/resume one session per project |
+| `start-planning` | no plan yet, no planning turn in flight | host: wake the main agent with the planning directive |
+| `plan-timeout` | planning exceeded `planTimeoutMs` (default **5 min**) | host: human gate |
+| `wake` | ready cards and an idle main agent | host: wake with the dispatch round |
+| `wait` | planning / working / cooldown / dependencies | scheduler: wait for the next event |
+| `human-gate` | blocking approval, failure, too many rounds, budget | panel: “等你决定” |
+| `complete` | every leaf card is done | host: write the delivery line |
+| `idle` | paused / cancelled / delivered / manual mode | — |
+
+Planning is budgeted: the delivery agent is told to spend **≤10 tool calls / ~3 minutes** and to put
+root-cause work into a `diagnose` card instead of investigating during planning. A single reminder is
+delivered at **2 minutes as a `steer` message** (it reaches the running turn at its next step boundary),
+and the planning turn is hard-stopped at `planTimeoutMs`.
+
+## Requirement intake
+
+`POST /workbench/requirements` accepts:
+
+```json
+{ "projectId": "prj_…", "text": "…", "file": { "name": "req.md", "base64": "…" },
+  "parentJobId": "deliveries_…", "kind": "change|fix|feature" }
+```
+
+- `text` or `file` is required; both may be present (the file is prepended).
+- Accepted documents: `.md`, `.markdown`, `.txt` up to 512 KiB; text up to 20 000 chars.
+- `parentJobId` (optional) must name an existing job in the same project; `kind` must be one of
+  `change` / `fix` / `feature`. Together they form a **change request** — a new immutable job linked to
+  the delivered one.
+- The route answers `202 accepted` with the new `jobId`; the board is the progress channel.
+- The panel opens the new job’s cockpit as soon as it is created.
+
+## Plan protocol
+
+`workbench_submit_plan({ jobId, brief, roles?, design?, tasks:[{ id, title, owner, stage, blockedBy?, instructions?, acceptance?, skill? }] })`
+
+- `tasks` non-empty (≤200), ids unique (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤64), titles ≤200, text ≤4000.
+- `blockedBy` may only reference ids in the same plan, ≤32 blockers, no cycles.
+- `owner ∈ {backend, frontend, qa, workbench}`; `stage ∈ {brief, roles, design, build, verify, report}`.
+  Only `build` / `verify` are dispatchable; `workbench` plans and verifies, it does not implement.
+- A plan becomes a `plan` line, a build container card, and one addressable card per work item.
+
+## Dispatch, evidence, gates
+
+- `workbench_next_work({ jobId?, projectId?, limit? })` returns ready cards with complete child prompts;
+  handing a card out writes a `claimed` line, so the board shows **进行中** instead of “待执行”.
+- `workbench_report_work` records the child’s evidence. **Done requires** `exitCode 0`,
+  `testsPassed > 0` and `testsFailed === 0`; otherwise the card is blocked and a person decides.
+- A card reported “done” without green tests becomes `blocked` (never silently done).
+- Blocking approvals freeze the card (and its dependents) only; the rest of the job keeps moving.
+- Human gates fire for: `session-unavailable`, `missing-requirement`, `plan-timeout`, `wake-failed`,
+  `stalled`, `rounds`, `budget`, `budget-tokens`.
+- Any irreversible action is never automated: it goes to the human lane.
+
+## Task groups and change requests
+
+- One root task = one card. Its change requests are compact rows inside that card (`后续 N 次修改`),
+  and the root card shows `● N 进行中` when a change is running.
+- The cockpit carries a **task group** breadcrumb (`员工管理 › 修复导出 › 修复导出2`) whose ancestors are
+  clickable; direct follow-ups are listed as chips with their status and progress.
+- A change request never rewrites the delivered job: lineage lives in `parentJobId` / `jobKind` on the
+  new job line, and the old job keeps its 14/14 result, evidence and artifacts.
+
+## Cockpit UI
+
+- **Board** — project cards, live activity, create/delete; **project home** — deliverables, preview,
+  one way into the tasks.
+- **Task list** — grouped root cards with change rows and live status/progress.
+- **Cockpit** — team graph (workbench / backend / frontend / qa lanes), stage rail, HUD panels:
+  progress, stages, tasks, “等你决定”, decision stream, deliverables, usage.
+- Toolbar: panels, manual execution (legacy jobs only), conversation, workspace, pause/resume,
+  terminate, and the primary action (`＋ 新建任务` / `＋ 修改/修复` when done).
+- Responsive: rails ≥1200 px, conversation side column ≥760 px, otherwise a stacked/drawer layout.
+- Visual language: instrument-style toolbar with layered “keys”, a deep indigo primary button
+  (5.0–5.6:1 contrast) with a slow breathing glow, `prefers-reduced-motion` respected.
+
+## Conversation and voice
+
+- The transcript is filtered to what a person said plus **the final answer of each turn**; planning
+  directives, wake reminders, tool calls and subagent notices are hidden. The job’s requirement is shown
+  as the first user bubble (it travels through the intake route, not the chat).
+- Images: paste, drag or pick (≤4, ≤8 MB each), sent through DSH’s draft-attachment path.
+- Voice: 🎤 records in the browser, decodes to **16 kHz mono PCM16 WAV**, posts to
+  `POST /workbench/transcribe`; the host transcribes with its shared `speechToText` service
+  (same model, settings and readiness as DSH’s own voice input) and the text is inserted into the draft
+  (never auto-sent). Without the voice bundle the route answers `501 speech-unavailable`.
+
+## Agent tools
+
+| Tool | Purpose |
+|---|---|
+| `workbench_submit_plan` | submit the validated DAG for a job (planning turn) |
+| `workbench_next_work` | list ready cards with child prompts; claims them active |
+| `workbench_report_work` | record a child’s files and test evidence; decides done/blocked/failed |
+| `workbench_add_task` | add a discovered card to the same dependency graph |
+| `workbench_find_skill` | search the session catalog and plugin market for a skill |
+| `workbench_delivery_diagnostics` | diagnose session/preset/model wiring for a stuck job |
+| `workbench_plan_software` | legacy host-side planner (kept for compatibility) |
+
+## HTTP API
+
+All routes are same-origin and sit behind the host connection fence.
+
+| Path | Method | Purpose |
+|---|---|---|
+| `/workbench/state` | GET | projection: summary + board + events + planning + speech |
+| `/workbench/requirements` | POST | closed-loop intake (new task or change request), 202 |
+| `/workbench/start` | POST | legacy host-side planner, 202 (the panel no longer calls it) |
+| `/workbench/projects` | POST/DELETE | create/delete a project card (delete writes a tombstone line) |
+| `/workbench/control` | POST | `pause` / `resume` / `cancel` for a project or one job |
+| `/workbench/decide` | POST | approve / reject a gate |
+| `/workbench/job-config` | POST | job title / workspace / workspaceId / sessionId |
+| `/workbench/project-config` | POST | legacy project workspace binding |
+| `/workbench/task` | POST | manual task progress/evidence (the report tool writes events directly) |
+| `/workbench/transcribe` | POST | proxy audio to the host speech-to-text service |
+| `/workbench/pick-path` | POST | native file/directory picker |
+| `/workbench/browse-path` | POST | list directories under allowed roots |
+
+## Storage
+
+- Ledger: `~/.dsh/workbench/events.jsonl` — append-only. Kinds: `project`, `job`, `requirement`,
+  `plan`, `task`, `artifact`, `approval`, `delivery`, `usage`, `dispatch`, plus decision lines.
+- Requirement documents: `~/.dsh/workbench/requirements/<jobId>.md`.
+- Legacy artifacts: `~/.dsh/workbench/deliveries/<runId>/{roles,design,review}.json`.
+- Project workspaces: the project directory (or `<dataDir>/apps/<projectId>`); delivered file paths
+  are workspace-relative in cards and artifacts.
+- Views (rail state, chat open state) live in `localStorage`; nothing important lives only there.
+
+## Configuration
+
+| Field | Default | Meaning |
+|---|---|---|
+| `dataDir` | `""` | Ledger/deliveries location; empty means `~/.dsh/workbench` |
+| `appsRoot` | `""` | Root for app workspaces; empty means `<dataDir>/apps` |
+| `agentPreset` | `""` | Agent preset for delivery sessions; empty uses the deployment default |
+| `provider` / `model` | `""` | Route for the legacy host-side planner; empty uses the deployment default |
+| `autoRun` | `true` | Drive intake-created jobs automatically |
+| `wakeCooldownMs` | `4000` | Minimum gap between two wakes |
+| `planTimeoutMs` | `300000` | Planning turn hard stop → human gate |
+| `planNudgeMs` | `120000` | One steer reminder during planning |
+| `maxRounds` | `60` | Wake-round trip-breaker per job |
+| `budgetUsd` | `0` | USD budget; `0` disables the gate (prices must be set) |
+| `budgetTokens` | `0` | Token budget; `0` disables the gate |
+| `priceInputPerMTok` / `priceOutputPerMTok` | `0` | USD per 1M tokens for cost accounting |
+| `loopTickMs` | `10000` | Safety-net loop interval |
+| `stallAfterWakes` | `6` | Wakes without board movement before the stall gate |
+
+Suggested deployment tuning:
+
+```yaml
+- id: workbench
+  config:
+    planTimeoutMs: 300000   # 5 min hard stop
+    planNudgeMs: 120000     # steer reminder at 2 min
+    budgetTokens: 400000    # per-job token cap; 0 disables
+```
+
 ## Install
 
-Requires DSH **0.2.1-rc.0 or newer** (`engines.dsh` in the manifest).
-
-This package is part of the [`jossion/dsh-tiangong`](https://github.com/jossion/dsh-tiangong) monorepo
-(`packages/workbench`), so install it from a checkout:
+Requires DSH **0.2.1-rc.0 or newer** (`engines.dsh`).
 
 ```bash
 git clone https://github.com/jossion/dsh-tiangong.git
 ```
 
-Then add the package directory to a profile with DSH's Plugin Manager (`install_bundle`) — or, for a
-CLI profile:
+Add the package with DSH’s Plugin Manager (`install_bundle`) — or, for a CLI profile:
 
 ```bash
 dsh plugin --profile <profile> add /path/to/dsh-tiangong/packages/workbench
 ```
 
-Restart DSH after installing, then open **Plugins → Installed** to confirm `@jos/workbench` is active
-and the **工作台 / Tiangong** entry appears in the sidebar.
+Restart DSH, then open **Plugins → Installed** to confirm `@jos/workbench` is active and the
+**工作台 / Tiangong** entry appears in the sidebar. For voice input, enable the DSH
+`voice-input-bundle` as well; the workbench shares its model and settings.
 
-The package resolves `@deepseek-ai/schemastery` from the DSH host for its `Config` schema; the
-manifest declares it as a peer dependency.
+## Companion module: @jos/company
 
-## Configuration
-
-The plugin exports a Schemastery `Config`, so every option is validated when the row activates and is
-visible in Plugin Manager:
-
-| Field | Default | Meaning |
-|---|---|---|
-| `dataDir` | `""` | Ledger and deliveries location; empty means `~/.dsh/workbench` |
-| `appsRoot` | `""` | Root for app workspaces created by the closed loop; empty means `<dataDir>/apps` |
-| `agentPreset` | `""` | Agent preset for delivery sessions; empty uses the deployment default |
-| `provider` / `model` | `""` | Legacy host-side planner route; empty uses the deployment default |
-| `autoRun` | `true` | Drive intake-created jobs automatically |
-| `wakeCooldownMs` | `4000` | Minimum gap between two wakes of the same agent |
-| `planTimeoutMs` | `900000` | A planning turn without a plan becomes a human gate after this |
-| `planNudgeMs` | `120000` | Send one planning reminder after this |
-| `maxRounds` | `60` | Wake-round trip-breaker per job |
-| `budgetUsd` | `0` | USD budget; `0` disables the gate |
-| `budgetTokens` | `0` | Token budget; `0` disables the gate |
-| `priceInputPerMTok` / `priceOutputPerMTok` | `0` | USD per 1M tokens for cost accounting |
-| `loopTickMs` | `10000` | Safety-net loop interval |
-| `stallAfterWakes` | `6` | Wakes without board progress before the stall gate fires |
-
-## Data
-
-The append-only ledger `~/.dsh/workbench/events.jsonl` is the single source of truth; every panel
-view is a projection of it. Delivered apps keep their SQLite databases under the project workspace
-the panel reads directly.
+The company half of the workbench ships as a separate bundle (`packages/company`) so the public
+workbench stays generic: 员工管理 (staff on the delivered app’s SQLite), 组织架构 (companies /
+departments / job levels), 财务管理 (bank-statement import or a read-only SQLite ledger) and 应用服务
+(start/stop the delivered app’s own server). Its routes are `/company/*`; see
+[`packages/company/README.md`](../company/README.md).
 
 ## Development
 
 ```bash
-cd packages/workbench
-npm test          # node:test suite
+cd packages/workbench && node --test tests/*.test.mjs   # 233 tests
+cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 ```
+
+- `node preview/seed.mjs` builds a static board preview from a fake run.
+- `docs/assets/*.png` are the screenshots referenced above.
+
+## Known limitations
+
+- Planning timeout is a hard gate: a very large requirement may need a higher `planTimeoutMs` (or a
+  `diagnose` card) rather than a longer planning turn.
+- The dispatcher only auto-drives jobs created through `/workbench/requirements`. Jobs created by the
+  legacy `/workbench/start` route (or `workbench_plan_software`) are planned host-side and executed
+  manually via the cockpit’s “开始执行”, which only shows for those jobs.
+- Token totals are folded from the project’s delivery session, so later jobs in one project include
+  the usage of earlier turns in that session; they are an upper bound, not a per-job delta.
+- Requirement uploads are text formats only (`.md` / `.txt`); `.docx` / `.pdf` are explicit “not yet”.
+- A change request shares its project’s delivery session and workspace; it never rewrites the parent
+  job’s cards or evidence.
+- Voice input needs the DSH voice bundle and a prepared local recognizer; without them the panel shows
+  a clear “current host has no speech recognition” error instead of failing silently.
 
 ## License
 

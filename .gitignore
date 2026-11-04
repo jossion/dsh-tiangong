@@ -24,3 +24,7 @@ _dsh_ref/
 AGENTS.md
 docs/
 scripts/
+# Package documentation is part of the published bundles even though the
+# repository keeps its internal notes under docs/.
+!packages/workbench/docs/
+!packages/workbench/docs/**

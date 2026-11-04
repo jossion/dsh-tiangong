@@ -61,7 +61,7 @@ plugin_manager action=install_bundle target=/Users/jossion/codes/dsh-workflow-jo
 | 决策日志 `events.jsonl` + 投影 | ✅ 已完成 |
 | 10 决策路由 / 三泳道 / 不可逆白名单 | ✅ 已完成（纯函数 + 测试） |
 | `GET /workbench/state` 只读投影路由 | ✅ 已完成 |
-| `POST /workbench/start` 任务入口（一句需求 → 挂到卡片/新建项目） | ✅ 已完成（同源校验 + 16KB 上限 + 单并发） |
+| `POST /workbench/requirements` 任务入口（一句需求/文档 → 开 job → 闭环自动规划派发） | ✅ 已完成（同源校验 + 512KB 上限 + 规划由调度器驱动） |
 | `POST /workbench/projects` 创建命名卡片 | ✅ 已完成（201 + projectId） |
 | 面板首页卡片网格 + 创建对话框 + 点卡进详情 | ✅ 已完成 |
 | 面板「新建任务」入口（详情页右上按钮 → 对话框） | ✅ 已完成 |
@@ -211,15 +211,21 @@ DSH 的既有计划里如果已经写死了串行依赖，**重跑一次规划**
 ## 任务入口（面板上的那一个）
 
 ```
-GET  /workbench/state  读：summary + board + 最近事件
-POST /workbench/start  写：{"requirement": "..."} → 202 {"status":"planning"}
+GET  /workbench/state          读：summary + board + 最近事件
+POST /workbench/requirements   写：{"projectId","text","file?","parentJobId?","kind?"}
+                                   → 202 {"status":"accepted","jobId"}
 ```
 
 POST 是这个路由**唯一的写操作**，规则写死在三处：
 
 1. **同源**：带 `Origin` 且 host 不匹配 → 403；没有 `Origin` 的本地请求（curl/测试）放行。
-2. **有界**：请求体上限 16KB（需求是一段话，不是上传）。
-3. **单并发**：已有运行中的规划 → 409 `already-running`。
+2. **有界**：请求体上限 512KB（文本需求 ≤20000 字；md/markdown/txt 可上传）。
+3. **归属**：`projectId` 必须是已存在的项目；`parentJobId`（修改/修复）必须是同项目里已交付的 job，
+   否则 400 `unknown-parent-job`；`kind ∈ change/fix/feature`。
+
+它**不等待规划**：job + requirement 落账后返回 202，闭环调度器随后绑定/复用项目投递会话、唤醒主
+agent 规划（`workbench_submit_plan`）、按依赖派卡。旧入口 `POST /workbench/start`（host 侧老规划器
++ 手动「开始执行」）仍保留作兼容，面板不再调用。
 
 响应是 `202 accepted` 而不是等结果：规划要跑好几次模型调用，HTTP 请求不该挂那么久。
 **面板就是进度条**——第一条 `project` 事件落账后，任务树就出现在看板上（前端本来就在 3 秒轮询）。
@@ -567,12 +573,25 @@ inject: ['slots', 'locale', 'sessions', 'conversation', 'workspaces']
 实现：
 - 驾驶舱在 `done` 状态下，主按钮从「新建任务」变成 **「＋ 修改/修复」**
 - 弹窗预填 `修改「员工管理」：`，并可选类型：**修改 / 修复 bug / 新增功能**（`jobKind`）
-- 子任务卡显示 `来自 员工管理`，父任务卡显示 `2 个后续任务`
+- 任务列表按「任务组」聚合：一个根任务一张卡，卡上标 `后续 N 次修改`，修改项以紧凑行挂在组内（点哪条进哪个驾驶舱）；驾驶舱顶部显示任务组面包屑，可直接切到祖先/后续任务
+- 驾驶舱的「后续」入口会打开对应 job；根任务不变，审计链完整保留
 - 账本：`job created` 事件带 `parentJobId`、`jobKind`（`kind` 字段留给账本行类型）
-- 接口：`POST /workbench/start { requirement, projectId, parentJobId, kind }`
+- 接口：`POST /workbench/requirements { projectId, text, parentJobId, kind }`（与新建任务同一条闭环入口）
+- 提交后面板自动进入**新任务**的驾驶舱（响应里的 jobId），不再停在父任务上；`workbench_next_work` 发卡即写 `claimed`，卡片立刻显示「执行中」，同一张卡不会被重复领取
 
 注意：**不要**直接编辑已完成的 job 的 title/workspace 以外的执行结果；产物目录按 run id 隔离，
 新任务写新目录，旧任务的交付物保持原样。
+
+## 驾驶舱视觉语言（2026-11-04）
+
+- 工具条：`.wb-toolbar` 玻璃槽（细边 + 内高光 + 外阴影），按钮 `.wb-tool` 是"3D 键帽"
+  （上下渐变 + 内高光 + 落影，hover 抬升 1px、active 回压）。
+- 主操作（修改/修复、开始执行）：`.wb-tool-primary` 固定深靛渐变 `#3f5cff → #6b3dff` + 白字，
+  对比度 5.0–5.6:1（**不再复用主题 brand 填充**：本主题 brand 是浅薰衣草 `#cad3f4`，白字实测 1.49:1，
+  这正是之前"文字发虚"的原因）。`.wb-tool-primary` 带 3.2s 呼吸光晕，hover 暂停呼吸，
+  `prefers-reduced-motion` 下关闭。
+- 语义色：暂停用 `--dsw-alias-state-warning-primary`、终止用 `--dsw-alias-state-error-primary`，
+  文字一律 `label-primary`（13.5:1），不再用 11px 的 `label-secondary` 灰字。
 
 ## 高度：按实测视口填满，底部 8px 对齐侧栏
 

@@ -579,6 +579,40 @@ test('the conversation bridge talks to the host, not to its own storage', async 
   assert.equal(await bridge.create(), 's2')
 })
 
+test('the conversation shows the owner and the final answer, not the process', async () => {
+  const entries = [
+    { event: { type: 'turn/start', data: { turn: 1 } } },
+    { event: { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'You are the delivery lead for the Workbench project "公司管理".' }] } } },
+    { event: { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '先看一眼目录…' }] } } } },
+    { event: { type: 'tool/call', data: {} } },
+    { event: { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '计划已提交：4 张卡。' }] } } } },
+    { event: { type: 'turn/end', data: { turn: 1 } } },
+    { event: { type: 'turn/start', data: { turn: 2 } } },
+    { event: { type: 'user/message', data: { source: { kind: 'agent-message' }, content: [{ type: 'text', text: 'Agent 123 sent a message: done' }] } } },
+    { event: { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '把蛇改得好看一点' }] } } },
+    { event: { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '好，我安排。' }] } } } },
+  ]
+  const ctx = {
+    get(name) {
+      if (name !== 'sessions') return undefined
+      return {
+        using: async (id, options, fn) => fn({
+          ready: Promise.resolve({
+            eventSource: { getSnapshot: () => ({ entries }) },
+            session: { prompt: async () => ({ ok: true }) },
+          }),
+        }),
+      }
+    },
+  }
+  const bridge = createSessionBridge(ctx)
+  assert.deepEqual(await bridge.transcript('s1'), [
+    { role: 'assistant', text: '计划已提交：4 张卡。' },
+    { role: 'user', text: '把蛇改得好看一点' },
+    { role: 'assistant', text: '好，我安排。' },
+  ], 'one answer per turn, no directives, no subagent notices')
+})
+
 test('the cockpit offers conversation and workspace controls per task', () => {
   const job = jobOf('j1', '员工管理', 1, 4, { sessionId: 's1', workspace: '/tmp/app' })
   const page = ProjectDetail({
@@ -877,22 +911,73 @@ test('a delivered task offers a change request instead of rewriting itself', () 
   assert.ok(strings.some(text => text.includes('followUp')), 'a done task shows a change-request action')
 })
 
-test('follow-up tasks show their lineage on the task card', () => {
-  const parent = jobOf('j1', '员工管理', 4, 4, { status: 'done' })
+test('a task group is one card plus its listed changes', () => {
+  const parent = jobOf('j1', '员工管理', 4, 4, { status: 'done', child: 1 })
   const child = { ...jobOf('j2', '修复导出', 1, 2), parentJobId: 'j1', kind: 'fix' }
+  const opened = []
   const page = TaskList({
     t,
     project: { ...project, jobs: [parent, child] },
     onBack: () => {},
-    onOpenJob: () => {},
+    onOpenJob: id => opened.push(id),
     onNewTask: () => {},
   })
   const strings = []
+  const buttons = []
   walk(page, node => {
     if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
+    if (node.type === 'button') buttons.push(node)
   })
-  assert.ok(strings.some(text => text === 'taskFrom 员工管理'), 'the child names its parent')
-  assert.ok(strings.some(text => text.includes('taskFollowUps')), 'the parent counts its follow-ups')
+  // One grid cell for the group: the root card counts its change requests and
+  // the change itself is a compact row instead of a second card.
+  assert.ok(strings.some(text => text.includes('taskFollowUps')), 'the root card counts its changes')
+  assert.ok(strings.some(text => text === '修复导出'), 'the change is listed under its group')
+  assert.ok(strings.some(text => text === 'followUpsTitle'), 'the change list has a heading')
+  const childNodes = node => Array.isArray(node.props?.children)
+    ? node.props.children
+    : node.props?.children === undefined ? [] : [node.props.children]
+  const changeRow = buttons.find(button => childNodes(button).some(child => child?.props?.children === '修复导出'))
+  assert.ok(changeRow !== undefined, 'the change row is a button')
+  changeRow.props.onClick()
+  assert.deepEqual(opened, ['j2'], 'clicking the change opens that job')
+})
+
+test('the cockpit shows the task group and steps between changes', () => {
+  const parent = jobOf('j1', '员工管理', 4, 4, { status: 'done' })
+  const child = { ...jobOf('j2', '修复导出', 1, 2), parentJobId: 'j1', kind: 'fix' }
+  const opened = []
+  const page = ProjectDetail({
+    t,
+    project: { ...project, jobs: [parent, child] },
+    job: child,
+    summary: {},
+    events: [],
+    onBack: () => {},
+    onControl: () => {},
+    onDecide: () => {},
+    bridge: { available: () => false },
+    onJobConfig: async () => {},
+    onOpenJob: id => opened.push(id),
+  })
+  const strings = []
+  const buttons = []
+  walk(page, node => {
+    if (typeof (node.props || {}).children === 'string') strings.push(node.props.children)
+    if (node.type === 'button') buttons.push(node)
+  })
+  assert.ok(strings.some(text => text === 'taskGroupLabel'), 'the cockpit names the group')
+  assert.ok(strings.some(text => text === '员工管理'), 'the ancestor job is shown')
+  const ancestor = buttons.find(button => button.props.children === '员工管理')
+  assert.ok(ancestor !== undefined, 'the ancestor is a link back')
+  ancestor.props.onClick()
+  assert.deepEqual(opened, ['j1'], 'clicking the ancestor opens that job')
+})
+
+test('every task submission goes through the closed-loop intake', async () => {
+  // The cockpit used to open jobs on the legacy /workbench/start route, which
+  // the dispatcher never adopts — the change request then sat at 0/N forever.
+  assert.equal(code.includes("'/workbench/start'"), false, 'the panel no longer uses the legacy start route')
+  assert.match(code, /'\/workbench\/requirements'/, 'new tasks and change requests share one intake')
 })
 
 test('the cockpit fills the measured height instead of a hard-coded 100vh offset', () => {
@@ -1029,6 +1114,33 @@ test('the cockpit can hand an unexecuted plan to the bound agent session', () =>
   assert.equal(sent[0][0], 'session-x')
   assert.ok(sent[0][1].includes('workbench_next_work'), 'the handoff prompt names the tools to use')
   assert.ok(sent[0][1].includes('j1'), 'and which job to execute')
+})
+
+test('an auto-driven job does not offer a manual execution round', () => {
+  // The closed loop dispatches intake jobs itself; a manual round would race
+  // it and spawn a second child per card, so the cockpit hides the button.
+  const job = jobOf('j1', '贪吃蛇修改', 1, 4, {
+    status: 'started', running: 0, sessionId: 'session-x',
+    requirement: { text: '改蛇' }, planBy: 'agent',
+  })
+  const page = ProjectDetail({
+    t,
+    project: { ...project, jobs: [job] },
+    job,
+    summary: {},
+    events: [],
+    onBack: () => {},
+    onControl: () => {},
+    onDecide: () => {},
+    bridge: { available: () => true, send: async () => true, list: async () => [], transcript: async () => [], create: async () => 'x', open: async () => {} },
+    onJobConfig: async () => {},
+  })
+  let manual = null
+  walk(page, node => {
+    const props = node.props || {}
+    if (typeof props.onClick === 'function' && typeof props.children === 'string' && props.children.includes('execStart')) manual = props
+  })
+  assert.equal(manual, null, 'the loop-driven job has no manual execute control')
 })
 
 test('the task dialog can attach a requirement document, and only offers it when supported', () => {

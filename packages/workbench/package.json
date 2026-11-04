@@ -15,6 +15,7 @@
     "icon.svg",
     "assets/icon-180.png",
     "docs/assets/*.png",
+    "docs/*.md",
     "README.md",
     "LICENSE"
   ],

@@ -18,7 +18,7 @@ export const DEFAULT_LOOP = {
   /** A successful wake must not be repeated before the agent had a chance to act. */
   wakeCooldownMs: 4000,
   /** A planning turn that never submits a plan falls back after this. */
-  planTimeoutMs: 15 * 60 * 1000,
+  planTimeoutMs: 5 * 60 * 1000,
   /** Wake rounds are the loop's trip counter; beyond it a person takes over. */
   maxRounds: 60,
   /** `null` disables the budget gate. */
