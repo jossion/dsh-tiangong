@@ -14,10 +14,21 @@ import { planEvent, taskEvent } from './projects.js'
 /** Who can own a card. `workbench` plans and verifies; it does not implement. */
 export const OWNERS = ['backend', 'frontend', 'qa', 'workbench']
 
-/** The fixed stage rail. Only build/verify produce dispatchable work. */
+/**
+ * The fixed stage rail.
+ *
+ * `brief` and `roles` are planning-only: they describe how the plan was
+ * understood, and a child agent cannot execute them. Everything else is
+ * deliverable work and may be dispatched — including `design`, because a plan
+ * legitimately uses it for contracts, data models and interface drafts. (A
+ * design card with dependents used to deadlock the whole chain: it could never
+ * be handed out, so nothing behind it could become ready.)
+ */
 export const PLAN_STAGES = ['brief', 'roles', 'design', 'build', 'verify', 'report']
 
-export const DISPATCH_STAGES = new Set(['build', 'verify'])
+export const PLANNING_STAGES = new Set(['brief', 'roles'])
+
+export const DISPATCH_STAGES = new Set(PLAN_STAGES.filter(stage => !PLANNING_STAGES.has(stage)))
 
 export const PLAN_LIMITS = {
   maxTasks: 200,
@@ -160,7 +171,7 @@ export function checkPlan(input, { jobId = null, projectId = null } = {}) {
 
   const dispatchable = tasks.some(task => DISPATCH_STAGES.has(task.stage) && task.owner !== 'workbench')
   if (tasks.length > 0 && !dispatchable) {
-    issues.push('a plan needs at least one dispatchable work item (stage build/verify, owner other than workbench)')
+    issues.push('a plan needs at least one dispatchable work item (a stage other than brief/roles, owner other than workbench)')
   }
 
   const roles = Array.isArray(source.roles)

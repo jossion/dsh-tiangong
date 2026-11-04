@@ -17,6 +17,7 @@
  *     Readiness is computed from the log, never from the dispatch order.
  */
 import { decide, evidence, riskConfidence, riskScore } from './router.js'
+import { DISPATCH_STAGES } from './planner.js'
 import { artifactEvent, taskEvent } from './projects.js'
 
 /** The order work is offered in: backend first, because the API unblocks UI. */
@@ -77,8 +78,9 @@ export function workItemPrompt({ project, task, siblingTitles = [] }) {
 }
 
 /**
- * Work the caller may start right now: a leaf card on a build/verify stage,
- * not done, with no open dependency.
+ * Work the caller may start right now: a leaf card on a dispatchable stage
+ * (`design` / `build` / `verify` / `report`), not done, with no open dependency.
+ * Planning-only cards (`brief` / `roles`) are never handed out.
  */
 export function readyWork(board, { projectId = null, jobId = null, limit = 3 } = {}) {
   const projects = Array.isArray(board?.projects) ? board.projects : []
@@ -105,7 +107,7 @@ export function readyWork(board, { projectId = null, jobId = null, limit = 3 } =
     // A blocked card reported "done" with no green tests; it must not be handed
     // out again as ready work, or the loop would retry it forever.
     if (task.status === 'done' || task.status === 'failed' || task.status === 'blocked') return
-    if (task.stage !== 'build' && task.stage !== 'verify') return
+    if (!DISPATCH_STAGES.has(task.stage)) return
     if (task.openBlockers.length > 0) return
     if (task.owner === null || task.owner === 'workbench') return
     // A blocking approval freezes THIS card and its dependents only; the rest

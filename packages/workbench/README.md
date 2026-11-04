@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.3.0`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.3.1`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -100,7 +100,8 @@ profile on the project line and `profiles.js` resolves it:
 - `tasks` non-empty (≤200), ids unique (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤64), titles ≤200, text ≤4000.
 - `blockedBy` may only reference ids in the same plan, ≤32 blockers, no cycles.
 - `owner ∈ {backend, frontend, qa, workbench}`; `stage ∈ {brief, roles, design, build, verify, report}`.
-  Only `build` / `verify` are dispatchable; `workbench` plans and verifies, it does not implement.
+  `brief` / `roles` are planning-only; `design` / `build` / `verify` / `report` cards are
+  dispatchable (a design-stage contract card used to deadlock everything behind it).
 - A plan becomes a `plan` line, a build container card, and one addressable card per work item.
 
 ## Dispatch, evidence, gates

@@ -200,3 +200,28 @@ test('a queue is scoped to one job, and a paused job hands out nothing', () => {
   assert.deepEqual(paused.work, [])
   assert.equal(paused.stopped, 'paused', 'the job status, not the project status, gates the queue')
 })
+
+test('a design-stage contract card is dispatchable work', () => {
+  const board = buildBoard([
+    projectEvent({ projectId: 'p1', title: '报价单系统', ts: ts(0) }),
+    taskEvent({ event: 'created', taskId: 'p1:build', projectId: 'p1', stage: 'build', owner: 'workbench', title: '实现', ts: ts(1) }),
+    taskEvent({
+      event: 'created', taskId: 'p1:wi:contract', parentId: 'p1:build', projectId: 'p1',
+      stage: 'design', owner: 'backend', role: '后端开发', title: '接口契约定稿', ts: ts(2),
+    }),
+    taskEvent({
+      event: 'created', taskId: 'p1:wi:data', parentId: 'p1:build', projectId: 'p1',
+      stage: 'build', owner: 'backend', role: '后端开发', title: '数据层', blockedBy: ['p1:wi:contract'], ts: ts(3),
+    }),
+    // A planning-only card is still never handed out, even when it is a leaf.
+    taskEvent({
+      event: 'created', taskId: 'p1:wi:brief', parentId: 'p1:build', projectId: 'p1',
+      stage: 'brief', owner: 'backend', role: '后端开发', title: '需求拆解', ts: ts(4),
+    }),
+  ])
+  assert.deepEqual(
+    readyWork(board).work.map(item => item.taskId),
+    ['p1:wi:contract'],
+    'the design card is ready and the build card behind it is not',
+  )
+})

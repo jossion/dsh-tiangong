@@ -186,3 +186,18 @@ test('the board exposes the plan marker and keeps skill/acceptance on cards', ()
   assert.equal(card.acceptance, '迁移可回滚')
   assert.equal(card.owner, 'backend')
 })
+
+test('design-stage work is dispatchable; brief/roles stay planning-only', () => {
+  const design = checkPlan({
+    ...base,
+    tasks: [{ id: 'contract', title: '接口契约定稿', stage: 'design', owner: 'backend' }],
+  })
+  assert.equal(design.ok, true, design.issues.join('; '))
+
+  const brief = checkPlan({
+    ...base,
+    tasks: [{ id: 'brief', title: '需求拆解', stage: 'brief', owner: 'backend' }],
+  })
+  assert.equal(brief.ok, false)
+  assert.match(brief.issues.join('; '), /dispatchable work item/)
+})
