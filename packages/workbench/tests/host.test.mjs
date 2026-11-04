@@ -1142,3 +1142,71 @@ test('transcription without a host recognizer reports a clean 501', async () => 
     assert.equal(JSON.parse(response.body).error.code, 'speech-unavailable')
   })
 })
+
+test('a project carries a capability profile and seeds its workspace', async () => {
+  await withDataDir(async dataDir => {
+    const workspace = join(dataDir, 'proj-software')
+    mkdirSync(workspace, { recursive: true })
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '公司管理', kind: 'software', workspace }), created)
+    assert.equal(created.status, 201)
+    const body = JSON.parse(created.body)
+    assert.equal(body.kind, 'software')
+    assert.equal(body.profile.preset, 'workbench-software')
+    assert.deepEqual(body.template.sort(), ['AGENTS.md', 'docs/README.md'].sort(), 'the workspace gets its rule skeleton')
+
+    const text = await readFile(join(workspace, 'AGENTS.md'), 'utf8')
+    assert.match(text, /项目约定/)
+    await readFile(join(workspace, 'docs', 'README.md'), 'utf8')
+
+    // The ledger is the source of truth: the kind and profile are recorded.
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    const line = (await log.all()).find(item => item.kind === 'project' && item.projectId === body.projectId)
+    assert.equal(line.projectKind, 'software')
+    assert.equal(line.profile.preset, 'workbench-software')
+
+    // The board projection exposes it to the panel.
+    const stateRoute = routes.find(route => route.path === STATE_PATH)
+    const state = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, state)
+    const project = JSON.parse(state.body).board.projects[0]
+    assert.equal(project.projectKind, 'software')
+    assert.equal(project.profile.preset, 'workbench-software')
+
+    // A second create does not overwrite the seeded AGENTS.md.
+    await projectsRoute.handler(postRequest({ name: '文案项目', kind: 'copy', workspace }), created)
+    const copy = JSON.parse(created.body)
+    assert.equal(copy.kind, 'copy')
+    assert.equal(copy.profile.preset, 'workbench-copy')
+    assert.match(await readFile(join(workspace, 'AGENTS.md'), 'utf8'), /软件交付/, 'existing template files stay untouched')
+  })
+})
+
+test('a bad project kind or workspace is refused', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+
+    const unknown = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: 'x', kind: 'nope' }), unknown)
+    assert.equal(unknown.status, 400)
+    assert.equal(JSON.parse(unknown.body).error.code, 'unknown-kind')
+
+    const missing = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: 'x', kind: 'software', workspace: join(dataDir, 'does-not-exist') }), missing)
+    assert.equal(missing.status, 400)
+    assert.equal(JSON.parse(missing.body).error.code, 'bad-workspace')
+
+    // Omitting the kind keeps old callers working, with the custom profile.
+    const legacy = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '旧项目' }), legacy)
+    assert.equal(legacy.status, 201)
+    assert.equal(JSON.parse(legacy.body).kind, 'custom')
+    assert.equal(JSON.parse(legacy.body).profile.preset, null)
+  })
+})

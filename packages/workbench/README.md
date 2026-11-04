@@ -9,11 +9,12 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.2.1`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.3.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
 
+- **Project types** — the create-project wizard offers **software delivery**, **copy writing** and **custom**; a type binds a lead-agent preset, a global-tool mask and a workspace template.
 - **Requirement intake** — paste text or attach `.md` / `.markdown` / `.txt` (≤512 KiB; text ≤20 000 chars) right in the panel. A change request can name the delivered job it follows.
 - **Planning as a contract** — the main agent submits a validated DAG (`workbench_submit_plan`) with owners, stages, dependencies and acceptance criteria; invalid plans are rejected with every issue at once.
 - **Dispatch loop** — one round at a time: ready cards go to child agents with a complete prompt, results come back through `workbench_report_work`.
@@ -50,6 +51,30 @@ Planning is budgeted: the delivery agent is told to spend **≤10 tool calls / ~
 root-cause work into a `diagnose` card instead of investigating during planning. A single reminder is
 delivered at **2 minutes as a `steer` message** (it reaches the running turn at its next step boundary),
 and the planning turn is hard-stopped at `planTimeoutMs`.
+
+## Project types and capability profiles
+
+A project is a capability profile, not only a name. `projects.js` stores the
+profile on the project line and `profiles.js` resolves it:
+
+| Type | Preset | Tool surface | Workspace template |
+|---|---|---|---|
+| `software` | `workbench-software` | plan / read / dispatch / verify; 3D, browser and bot tool families masked | `AGENTS.md` + `docs/` + acceptance gate |
+| `copy` | `workbench-copy` | read / write / search / review; shell, 3D, browser and bot tool families masked | `AGENTS.md` + `docs/` + review checklist |
+| `custom` | deployment default | nothing masked | none |
+
+- The preset (declared in this bundle's `cordis.patch.yml`) owns the lead's
+  persona and its scoped tool composition.
+- The mask is applied with `tools.restrict()` on the delivery session's agent
+  scope, because a preset cannot remove tools that other plugins registered
+  globally. Only names the deployment actually registered are denied.
+- `POST /workbench/projects` accepts `{ name, kind, workspace? }`; a workspace
+  must be an existing allowed absolute directory. The wizard's third step lets
+  you type a path **or** choose a folder with the host's native picker
+  (`POST /workbench/pick-path`, Electron or the OS helper). Leave it empty and
+  the host assigns `~/.dsh/workbench/apps/<project>`.
+- When a workspace is given, `AGENTS.md` and `docs/README.md` are seeded
+  without overwriting existing files.
 
 ## Requirement intake
 
@@ -237,6 +262,15 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - Token totals are folded from the project’s delivery session, so later jobs in one project include
   the usage of earlier turns in that session; they are an upper bound, not a per-job delta.
 - Requirement uploads are text formats only (`.md` / `.txt`); `.docx` / `.pdf` are explicit “not yet”.
+- Capability profiles apply when a delivery session is created (and its tool mask
+  when the session is first prepared). An existing session keeps its composition;
+  start a new project to change type, or edit the preset in the profile.
+- The tool mask covers the delivery session's own scope. Subagent tool surfaces
+  and the skill catalog are not narrowed yet; the preset composition narrows the
+  lead's own tools, and the mask removes global families only.
+- `custom` follows `config.agentPreset` (or the deployment default) and masks
+  nothing, which is the right default for a host without the two workbench
+  presets installed.
 - A change request shares its project’s delivery session and workspace; it never rewrites the parent
   job’s cards or evidence.
 - Voice input needs the DSH voice bundle and a prepared local recognizer; without them the panel shows

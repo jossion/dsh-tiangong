@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { foldUsage } from './usage.js'
+import { resolveProjectProfile, toolFilterFor } from './profiles.js'
 
 /** Minimal UserMessage the Session log accepts as a user/message event. */
 export function userMessage(text) {
@@ -39,6 +40,51 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   /** Sessions this process already ensured a model/preset for. */
   const modelSelected = new Set()
   const presetSelected = new Set()
+  const policyApplied = new Set()
+
+  /** A project's capability profile (type plus preset plus global-tool mask). */
+  const profileOf = project => project?.profile ?? resolveProjectProfile(project?.projectKind ?? 'custom')
+
+  /**
+   * Mask the deployment's global tool families for one delivery session.
+   *
+   * A preset composition cannot remove a tool another plugin registered
+   * globally (Blender, ComfyUI, computer-use, the bot/team surface), so a
+   * project type needs this second lever. `tools.restrict` is scoped to the
+   * calling agent: it must run on the agent's own context, and only names this
+   * deployment actually registered may be denied.
+   */
+  async function applyToolPolicy(project, sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return { ok: false, applied: false, error: 'no session bound' }
+    }
+    if (policyApplied.has(sessionId)) return { ok: true, applied: true, cached: true }
+    const profile = profileOf(project)
+    if (profile.tools === null || profile.tools === undefined) {
+      policyApplied.add(sessionId)
+      return { ok: true, applied: false, reason: 'profile has no tool policy' }
+    }
+    const agent = await resolveAgent(sessionId)
+    const ctx = agent !== null && agent !== undefined ? agent.ctx : undefined
+    const tools = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('tools') : undefined
+    if (tools === null || tools === undefined || typeof tools.schemas !== 'function' || typeof tools.restrict !== 'function') {
+      return { ok: false, applied: false, error: 'agent tool scope unavailable' }
+    }
+    let schemas = []
+    try { schemas = tools.schemas() } catch { schemas = [] }
+    const filter = toolFilterFor(profile, (Array.isArray(schemas) ? schemas : []).map(schema => schema?.name))
+    if (filter === null) {
+      policyApplied.add(sessionId)
+      return { ok: true, applied: false, denied: [] }
+    }
+    try {
+      tools.restrict(filter)
+      policyApplied.add(sessionId)
+      return { ok: true, applied: true, denied: filter.deny }
+    } catch (error) {
+      return { ok: false, applied: false, error: String(error?.message ?? error) }
+    }
+  }
 
   const dataDir = () => config.dataDir
   const appsRoot = () => (typeof config.appsRoot === 'string' && config.appsRoot.trim() !== ''
@@ -199,7 +245,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
    * every step. Swallowing these failures silently is what made the live loop
    * undiagnosable; the result is written to the ledger by the dispatcher.
    */
-  async function prepare(sessionId) {
+  async function prepare(sessionId, project = null) {
     const controller = optional('sessionController')
     const report = {
       sessionId,
@@ -213,6 +259,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       presetError: null,
       model: null,
       modelError: null,
+      policy: null,
     }
     if (controller === null || controller === undefined) {
       report.presetError = 'sessionController unavailable'
@@ -233,6 +280,9 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       report.model = result.selection
       report.modelError = result.error
       modelSelected.add(sessionId)
+    }
+    if (project !== null && project !== undefined) {
+      report.policy = await applyToolPolicy(project, sessionId)
     }
     return report
   }
@@ -275,7 +325,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     if (controller !== null && controller !== undefined && typeof controller.prompt === 'function') {
       // A session created before the preset/model was installed (or created by
       // an older build of this bridge) must get both before its first turn.
-      const preparation = await prepare(sessionId)
+      const preparation = await prepare(sessionId, options?.project ?? null)
       try {
         const receipt = await controller.prompt({
           requestId: randomUUID(),
@@ -323,12 +373,15 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: true, sessionId: project.sessionId, workspace: project.workspace ?? null, created: false }
     }
     const { path, workspaceId } = await ensureWorkspace(project)
-    // An explicit config wins; otherwise let the controller mount the
-    // deployment default preset (which supplies prompt variables such as
-    // {{model}}). Inventing 'standard' skipped that mount.
-    const preset = typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
-      ? config.agentPreset.trim()
-      : null
+    // The project's capability profile chooses the persona/tool composition;
+    // the deployment config is the fallback for `custom` projects (or when the
+    // named preset is not installed, which resolve() reports below).
+    const profile = profileOf(project)
+    const preset = typeof profile?.preset === 'string' && profile.preset !== ''
+      ? profile.preset
+      : (typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
+        ? config.agentPreset.trim()
+        : null)
     const controller = optional('sessionController')
     // Resolve the deployment default preset id so the created session is
     // composed with it from the first turn (the controller's own fallback does
@@ -362,6 +415,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       // A new Session has no model selected until someone selects one; without
       // it the deployment prompt has no {{model}} value and the first turn dies.
       const selected = await selectDefaultModel(controller, created.sessionId)
+      const policy = await applyToolPolicy(project, created.sessionId)
       return {
         ok: true,
         sessionId: created.sessionId,
@@ -370,6 +424,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
         created: true,
         agentPreset: created.agentPreset ?? presetId,
         model: selected.selection,
+        policy,
       }
     }
 
@@ -396,7 +451,8 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     } catch (error) {
       return { ok: false, error: `agent create failed: ${String(error?.message ?? error)}`, sessionId, workspace: path, workspaceId }
     }
-    return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset }
+    const policy = await applyToolPolicy(project, sessionId)
+    return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset, policy }
   }
 
   return { ensureProjectSession, ensureWorkspace, wake, prepare, measureUsage, resolveAgent, appRootFor }

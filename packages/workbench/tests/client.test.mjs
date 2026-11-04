@@ -1236,3 +1236,94 @@ test('the modal is announced to assistive tech with a label', () => {
   assert.equal(panel.props['aria-modal'], 'true')
   assert.equal(panel.props['aria-label'], '创建应用')
 })
+
+const textOf = node => {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  if (node !== null && typeof node === 'object') return textOf(node.props?.children)
+  return ''
+}
+
+test('the create-project wizard offers three project types and their facts', () => {
+  const { CreateProjectWizard } = module.__components
+  const page = CreateProjectWizard({
+    t, name: '公司管理', kind: 'software', workspace: '', busy: false,
+    onChangeName() {}, onChangeKind() {}, onChangeWorkspace() {}, onCancel() {}, onConfirm() {},
+    initialStep: 2,
+  })
+  const text = textOf(page)
+  for (const key of [
+    'typeSoftware', 'typeCopy', 'typeCustom',
+    'typeFactPersona', 'typeFactTools', 'typeFactMemory', 'typeFactTemplate',
+    'personaSoftware', 'toolsSoftware', 'templateSoftware',
+  ]) assert.ok(text.includes(key), `the wizard shows ${key}`)
+  const panel = (() => { let found = null; walk(page, node => { if (node.props?.role === 'dialog') found = node.props }); return found })()
+  assert.equal(panel.style.width, '560px', 'the wizard is wider than the single-field dialog')
+})
+
+test('picking a project type reports it to the caller', () => {
+  const { CreateProjectWizard } = module.__components
+  const picked = []
+  const page = CreateProjectWizard({
+    t, name: '公司管理', kind: 'software', workspace: '', busy: false,
+    onChangeName() {}, onChangeKind: id => picked.push(id), onChangeWorkspace() {}, onCancel() {}, onConfirm() {},
+    initialStep: 2,
+  })
+  let copyCard = null
+  walk(page, node => {
+    if (node.type !== 'button' || typeof node.props?.onClick !== 'function') return
+    if (textOf(node).includes('typeCopy')) copyCard = node.props
+  })
+  assert.ok(copyCard, 'the copy card is a button')
+  copyCard.onClick()
+  assert.deepEqual(picked, ['copy'])
+})
+
+test('the workspace step shows the summary and creates on confirm', () => {
+  const { CreateProjectWizard } = module.__components
+  let confirmed = 0
+  const page = CreateProjectWizard({
+    t, name: '公司管理', kind: 'copy', workspace: '/tmp/company-copy', busy: false,
+    onChangeName() {}, onChangeKind() {}, onChangeWorkspace() {}, onCancel() {}, onConfirm: () => { confirmed += 1 },
+    initialStep: 3,
+  })
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  const text = parts.join(' ')
+  let workspaceField = null
+  walk(page, node => {
+    if (node.type === 'input' && node.props?.placeholder === 'createWorkspacePlaceholder') workspaceField = node.props
+  })
+  assert.ok(workspaceField, 'the workspace field is offered')
+  assert.ok(text.includes('createAdvanced'), 'the read-only advanced block is shown')
+  assert.ok(text.includes('workbench-copy'), 'the preset is visible in the read-only advanced block')
+  assert.equal(workspaceField.value, '/tmp/company-copy', 'the workspace field holds the path')
+  assert.ok(text.includes('createConfirm'), 'the primary action is create')
+  let confirmButton = null
+  walk(page, node => {
+    if (node.type === 'button' && typeof node.props?.onClick === 'function' && textOf(node) === 'createConfirm') confirmButton = node.props
+  })
+  assert.ok(confirmButton, 'the confirm button exists')
+  confirmButton.onClick()
+  assert.equal(confirmed, 1, 'confirming on the last step creates the project')
+})
+
+test('the workspace step offers a native folder picker next to the path field', () => {
+  const { CreateProjectWizard } = module.__components
+  let picked = 0
+  const page = CreateProjectWizard({
+    t, name: '公司管理', kind: 'software', workspace: '', busy: false, picking: false,
+    onChangeName() {}, onChangeKind() {}, onChangeWorkspace() {}, onPickWorkspace: () => { picked += 1 },
+    onCancel() {}, onConfirm() {}, initialStep: 3,
+  })
+  let pickButton = null
+  walk(page, node => {
+    if (node.type === 'button' && typeof node.props?.onClick === 'function' && textOf(node) === 'createWorkspacePick') pickButton = node.props
+  })
+  assert.ok(pickButton, 'the picker button exists')
+  pickButton.onClick()
+  assert.equal(picked, 1, 'clicking it asks the host for a folder')
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  assert.ok(parts.join(' ').includes('createWorkspaceHint'), 'the hint explains typing and picking')
+})

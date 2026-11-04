@@ -30,6 +30,7 @@ import { RequirementError, assertRequirement, storeRequirement } from './require
 import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills } from './skillfind.js'
 import { createSessionBridge } from './sessions.js'
 import { createDispatcher } from './dispatch.js'
+import { PROJECT_KINDS, resolveProjectProfile } from './profiles.js'
 
 export const inject = ['llm', 'tools']
 
@@ -171,6 +172,54 @@ function sendJson(response, status, value) {
 }
 
 /** Cap the request body: a requirement is a paragraph, not an upload. */
+/** Advisory AGENTS.md seeds per project capability profile. */
+const TEMPLATE_AGENTS = {
+  software: `# 项目约定（天工 · 软件交付）
+
+- 本目录由天工工作台交付；项目的一切长期约定写在这里。
+- 测试命令：<!-- 例如 npm test -->
+- 目录：\`src/\` 源码、\`tests/\` 测试、\`docs/\` 设计/接口/已知问题。
+- 交付定义：真实退出码 0、通过数 > 0、失败数 0；否则视为未完成。
+- 禁止：未经卡片要求不要改动本文件之外的全局配置。
+`,
+  copy: `# 项目约定（天工 · 文案内容）
+
+- 本目录由天工工作台交付；项目的一切长期约定写在这里。
+- 受众与语气：<!-- 一句话 -->
+- 术语与品牌口径：<!-- 列在这里 -->
+- 结构：\`drafts/\` 草稿、\`final/\` 定稿、\`docs/\` 资料与审校记录。
+- 交付定义：结构完整、事实可溯、审校清单通过；否则视为未完成。
+`,
+}
+
+/**
+ * Seed the project workspace with its rule skeleton. Idempotent: existing
+ * files are never overwritten, and a failure is advisory (the project is
+ * still created) because a read-only directory must not block intake.
+ */
+async function seedWorkspaceTemplate(profile, workspace) {
+  if (profile === null || profile === undefined || profile.template === 'custom') return []
+  if (typeof workspace !== 'string' || workspace === '') return []
+  const created = []
+  try {
+    await mkdir(join(workspace, 'docs'), { recursive: true })
+    const agentsPath = join(workspace, 'AGENTS.md')
+    const agentsText = TEMPLATE_AGENTS[profile.template]
+    if (typeof agentsText === 'string' && !existsSync(agentsPath)) {
+      await writeFile(agentsPath, agentsText, 'utf8')
+      created.push('AGENTS.md')
+    }
+    const docsReadme = join(workspace, 'docs', 'README.md')
+    if (!existsSync(docsReadme)) {
+      await writeFile(docsReadme, '# 项目文档\n\n交付说明、接口约定、已知问题与交接记录放在这里。\n', 'utf8')
+      created.push('docs/README.md')
+    }
+  } catch {
+    /* templates are advisory; never fail a create because of them */
+  }
+  return created
+}
+
 const MAX_BODY_BYTES = 16 * 1024
 
 /**
@@ -427,25 +476,56 @@ export function apply(ctx, row) {
         sendJson(response, 405, { error: { code: 'method-not-allowed' } })
         return
       }
-      let name = ''
+      let body = null
       try {
-        name = String((await readJsonBody(request))?.name ?? '').trim()
+        body = await readJsonBody(request)
       } catch (error) {
         sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
         return
       }
+      const name = String(body?.name ?? '').trim()
       if (name === '') {
         sendJson(response, 400, { error: { code: 'empty-name', message: 'name must not be empty' } })
         return
       }
+      // A project type is required for new creations; an explicit unknown type
+      // is a client bug, not something to silently downgrade.
+      const kind = body?.kind === undefined || body?.kind === null || String(body.kind).trim() === ''
+        ? 'custom'
+        : String(body.kind).trim()
+      if (!PROJECT_KINDS.includes(kind)) {
+        sendJson(response, 400, {
+          error: { code: 'unknown-kind', message: `kind must be one of ${PROJECT_KINDS.join(', ')}` },
+        })
+        return
+      }
+      const workspaceInput = String(body?.workspace ?? '').trim()
+      let workspace = null
+      if (workspaceInput !== '') {
+        if (!isAbsolute(workspaceInput) || !existsSync(workspaceInput) || !statSync(workspaceInput).isDirectory()) {
+          sendJson(response, 400, { error: { code: 'bad-workspace', message: 'workspace must be an existing absolute directory' } })
+          return
+        }
+        if (!pathAllowed(workspaceInput, allowedRoots(ctx, config))) {
+          sendJson(response, 403, { error: { code: 'path-not-allowed', message: `outside the allowed roots: ${workspaceInput}` } })
+          return
+        }
+        workspace = workspaceInput
+      }
+      const profile = resolveProjectProfile(kind)
+      const template = await seedWorkspaceTemplate(profile, workspace)
       const projectId = `prj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
       await events.append(projectEvent({
         projectId,
         title: name.slice(0, 80),
         event: 'created',
+        projectKind: kind,
+        profile,
+        ...(workspace === null ? {} : { workspace }),
+        ...(template.length === 0 ? {} : { templateFiles: template }),
         ts: new Date().toISOString(),
       }))
-      sendJson(response, 201, { projectId, name: name.slice(0, 80) })
+      sendJson(response, 201, { projectId, name: name.slice(0, 80), kind, profile, workspace, template })
     },
   }
 

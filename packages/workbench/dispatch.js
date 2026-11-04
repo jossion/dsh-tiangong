@@ -150,7 +150,7 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
 
   async function wakeJob(project, job, text, { mode, deliver }) {
     const facts = factsOf(runtime, job.id)
-    const result = await sessions.wake(job.sessionId, text, { deliver })
+    const result = await sessions.wake(job.sessionId, text, { deliver, project })
     facts.lastWakeAt = now()
     facts.rounds += 1
     if (mode === 'dispatch' && result.ok === true) {

@@ -120,11 +120,56 @@ window.__ModuleLoader__.load({
         deleteCardConfirm: 'Delete card',
         deleteCardWorkspace: 'Workspace: {workspace}',
         deleteCardNoWorkspace: 'Workspace: not set (no app files to keep)',
-        createDialogTitle: 'Create an app',
+        createDialogTitle: 'Create a project',
         createNamePlaceholder: 'e.g. Company operations',
-        createHint: 'The app gets its own workspace and a dedicated delivery session. Submit a requirement and the automatic loop takes over.',
+        createHint: 'The project gets its own workspace, capability profile and delivery session. Submit a requirement and the loop takes over.',
         createCancel: 'Cancel',
-        createConfirm: 'Create app',
+        createConfirm: 'Create project',
+        createStepBasic: 'Basics',
+        createStepType: 'Project type',
+        createStepWorkspace: 'Workspace',
+        createStepLabel: 'Step {n} / 3',
+        createNext: 'Next',
+        createBack: 'Back',
+        createTypeTitle: 'What kind of project is this?',
+        createTypeHint: 'The type decides the lead agent persona, the tool surface and the workspace template. It can be changed later in project settings.',
+        typeSoftware: 'Software delivery',
+        typeSoftwareMeta: 'Plan → dispatch → test-evidence gate',
+        typeCopy: 'Copy writing',
+        typeCopyMeta: 'Outline → draft → review → final',
+        typeCustom: 'Custom',
+        typeCustomMeta: 'Start from the deployment default',
+        typeFactPersona: 'Persona',
+        typeFactTools: 'Tool surface',
+        typeFactMemory: 'Memory and rules',
+        typeFactTemplate: 'Workspace template',
+        personaSoftware: 'Delivery lead: plans, dispatches and verifies; does not implement',
+        personaCopy: 'Content lead: outlines, dispatches and reviews; does not write the final copy',
+        personaCustom: 'Deployment default agent, no extra tool mask',
+        toolsSoftware: 'Plan + read files + dispatch + verify; 3D, browser and bot tools masked',
+        toolsCopy: 'Read/write/search/review; shell, 3D, browser and bot tools masked',
+        toolsCustom: 'Deployment default; nothing masked',
+        templateSoftware: 'AGENTS.md · docs/ · acceptance gate',
+        templateCopy: 'AGENTS.md · docs/ · review checklist',
+        templateCustom: 'No template files',
+        memoryWorkspace: 'Workspace AGENTS.md + docs/ (project memory)',
+        memoryDefault: 'Deployment default',
+        createWorkspaceLabel: 'Workspace (optional)',
+        createWorkspacePlaceholder: 'Type an absolute path, or choose a folder from this computer',
+        createWorkspaceHint: 'Type the path or pick a folder from this computer. Leave it empty to auto-assign ~/.dsh/workbench/apps/<project>. AGENTS.md and docs/ are seeded without overwriting existing files.',
+        createWorkspacePick: 'Choose folder…',
+        createWorkspacePicking: 'Choosing…',
+        createWorkspacePickFailed: 'The folder picker is not available in this window; type the path instead.',
+        createWorkspaceOutside: 'That folder is outside the allowed roots (home, data dir, or a registered workspace).',
+        createAdvanced: 'Advanced (read-only)',
+        createPresetLabel: 'Agent preset',
+        createToolsLabel: 'Masked tools',
+        createModelLabel: 'Model',
+        createMemoryLabel: 'Memory',
+        createDeployDefault: 'Deployment default',
+        createSummary: 'Will create “{name}” · {type}',
+        createSummaryWorkspace: 'Workspace: {workspace}',
+        createAutoWorkspace: 'auto-assigned',
         uploadChoose: 'Attach requirement doc',
         uploadRemove: 'Remove',
         uploadHint: 'Accept .md / .markdown / .txt up to 512 KiB. You can also paste the requirement.',
@@ -382,11 +427,56 @@ window.__ModuleLoader__.load({
         deleteCardConfirm: '删除卡片',
         deleteCardWorkspace: '工作区：{workspace}',
         deleteCardNoWorkspace: '工作区：未设置（没有应用文件）',
-        createDialogTitle: '创建应用',
+        createDialogTitle: '创建项目',
         createNamePlaceholder: '例如：公司管理',
-        createHint: '创建后自动分配工作区和专属交付会话；提交需求就进入自动闭环。',
+        createHint: '创建后自动分配工作区、能力包和专属交付会话；提交需求就进入自动闭环。',
         createCancel: '取消',
-        createConfirm: '创建应用',
+        createConfirm: '创建项目',
+        createStepBasic: '基本信息',
+        createStepType: '项目类型',
+        createStepWorkspace: '工作区',
+        createStepLabel: '步骤 {n} / 3',
+        createNext: '下一步',
+        createBack: '上一步',
+        createTypeTitle: '这个项目是什么类型？',
+        createTypeHint: '类型决定主 agent 的人格、可用工具与工作区模板；之后可在项目设置里改。',
+        typeSoftware: '软件交付',
+        typeSoftwareMeta: '规划 → 派卡 → 测试证据验收',
+        typeCopy: '文案内容',
+        typeCopyMeta: '结构 → 撰写 → 审校 → 定稿',
+        typeCustom: '自定义',
+        typeCustomMeta: '从部署默认能力包开始',
+        typeFactPersona: '人格',
+        typeFactTools: '工具面',
+        typeFactMemory: '记忆与规则',
+        typeFactTemplate: '工作区模板',
+        personaSoftware: '交付 lead：规划/派卡/验收，不亲自实现',
+        personaCopy: '内容 lead：结构/撰写/审校，不亲自写定稿',
+        personaCustom: '部署默认 agent，不额外屏蔽工具',
+        toolsSoftware: '规划 + 读文件 + 派卡 + 验证；屏蔽 3D/浏览器/机器人工具',
+        toolsCopy: '读/写/搜索/审校；屏蔽 shell、3D、浏览器、机器人工具',
+        toolsCustom: '继承部署默认，不额外屏蔽',
+        templateSoftware: 'AGENTS.md · docs/ · 验收脚本',
+        templateCopy: 'AGENTS.md · docs/ · 审校清单',
+        templateCustom: '不生成模板文件',
+        memoryWorkspace: '工作区 AGENTS.md + docs/（项目内长期记忆）',
+        memoryDefault: '跟随部署默认',
+        createWorkspaceLabel: '工作区（可选）',
+        createWorkspacePlaceholder: '输入绝对路径，或点右侧「选择文件夹」从本机选择',
+        createWorkspaceHint: '可以直接输入绝对路径，也可以点「选择文件夹」从本机硬盘选择；留空自动分配 ~/.dsh/workbench/apps/<项目>。会生成 AGENTS.md 与 docs/（不覆盖已有文件）。',
+        createWorkspacePick: '选择文件夹…',
+        createWorkspacePicking: '正在选择…',
+        createWorkspacePickFailed: '当前窗口无法打开系统选择器，请直接输入路径。',
+        createWorkspaceOutside: '该目录不在允许范围内（主目录、数据目录或已注册工作区）。',
+        createAdvanced: '高级（只读）',
+        createPresetLabel: 'Agent preset',
+        createToolsLabel: '工具面屏蔽',
+        createModelLabel: '模型',
+        createMemoryLabel: '记忆',
+        createDeployDefault: '部署默认',
+        createSummary: '将创建「{name}」· {type}',
+        createSummaryWorkspace: '工作区：{workspace}',
+        createAutoWorkspace: '自动分配',
         uploadChoose: '选择需求文档',
         uploadRemove: '移除',
         uploadHint: '支持 .md / .markdown / .txt，≤512 KiB；也可以直接粘贴需求。',
@@ -3308,7 +3398,7 @@ window.__ModuleLoader__.load({
           'aria-modal': 'true',
           'aria-label': title,
           tabIndex: -1,
-          style: { ...s.card, width: '420px', maxWidth: '88vw' },
+          style: { ...s.card, width: props.width ?? '420px', maxWidth: '92vw' },
           onClick: event => event.stopPropagation(),
         },
           h('h2', { style: s.sectionTitle }, title),
@@ -3325,26 +3415,193 @@ window.__ModuleLoader__.load({
             }, confirmLabel))))
     }
 
-    function CreateCardDialog(props) {
-      const { t } = props
+    /** The three project types the wizard offers; the host resolves the same ids. */
+    const PROJECT_TYPES = [
+      {
+        id: 'software', labelKey: 'typeSoftware', metaKey: 'typeSoftwareMeta', preset: 'workbench-software',
+        personaKey: 'personaSoftware', toolsKey: 'toolsSoftware', templateKey: 'templateSoftware',
+        memoryKey: 'memoryWorkspace',
+      },
+      {
+        id: 'copy', labelKey: 'typeCopy', metaKey: 'typeCopyMeta', preset: 'workbench-copy',
+        personaKey: 'personaCopy', toolsKey: 'toolsCopy', templateKey: 'templateCopy',
+        memoryKey: 'memoryWorkspace',
+      },
+      {
+        id: 'custom', labelKey: 'typeCustom', metaKey: 'typeCustomMeta', preset: null,
+        personaKey: 'personaCustom', toolsKey: 'toolsCustom', templateKey: 'templateCustom',
+        memoryKey: 'memoryDefault',
+      },
+    ]
+
+    /**
+     * Create-project wizard: basics → project type → workspace.
+     *
+     * The type is the project's capability profile, so it is a real step rather
+     * than a hidden default: the lead agent's persona, its tool surface and the
+     * workspace template all hang off it.
+     */
+    function CreateProjectWizard(props) {
+      const { t, name, kind, workspace, error, busy } = props
+      // `initialStep` is a test seam; the product always starts at step 1.
+      const [step, setStep] = useState(props.initialStep ?? 1)
+      const type = PROJECT_TYPES.find(item => item.id === kind) ?? PROJECT_TYPES[0]
+      const canCreate = String(name ?? '').trim() !== ''
+      const advance = () => {
+        if (step < 3) { setStep(step + 1); return }
+        if (canCreate) props.onConfirm()
+      }
+      const stepChip = (index, label) => h('div', {
+        key: `create-step-${index}`,
+        style: { display: 'flex', alignItems: 'center', gap: '6px' },
+      },
+        h('span', {
+          style: {
+            width: '20px', height: '20px', borderRadius: '50%', display: 'grid', placeItems: 'center',
+            fontSize: '11px', fontWeight: 600,
+            color: step === index ? '#fff' : 'var(--dsw-alias-label-secondary)',
+            background: step === index ? 'linear-gradient(135deg,#3f5cff,#6b3dff)' : 'transparent',
+            border: step === index ? '1px solid transparent' : '1px solid var(--dsw-alias-border-l2)',
+            boxShadow: step === index ? '0 0 0 3px rgba(79,140,255,.16)' : 'none',
+          },
+        }, step > index ? '✓' : String(index)),
+        h('span', {
+          style: {
+            fontSize: '12px',
+            color: step === index ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+            fontWeight: step === index ? 600 : 400,
+          },
+        }, label))
+      const fact = (label, value) => h('div', {
+        key: `create-fact-${label}`,
+        style: { display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '10px', alignItems: 'baseline', fontSize: '12px' },
+      },
+        h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label),
+        h('span', { style: { color: 'var(--dsw-alias-label-primary)' } }, value))
+      const card = item => h('button', {
+        key: item.id,
+        type: 'button',
+        className: 'wb-btn',
+        role: 'radio',
+        'aria-checked': item.id === type.id,
+        onClick: () => props.onChangeKind(item.id),
+        style: {
+          position: 'relative', textAlign: 'left', display: 'flex', gap: '10px', alignItems: 'flex-start',
+          padding: '11px 12px', borderRadius: '10px', cursor: 'pointer', minHeight: '58px',
+          border: item.id === type.id ? '1px solid #5b6fff' : '1px solid var(--dsw-alias-border-l2)',
+          background: item.id === type.id
+            ? 'linear-gradient(160deg, rgba(63,92,255,.14), rgba(107,61,255,.06))'
+            : 'var(--dsw-alias-bg-layer-1)',
+          boxShadow: item.id === type.id ? '0 0 0 1px rgba(91,111,255,.45) inset' : 'none',
+        },
+      },
+        h('span', { style: { display: 'block', minWidth: 0 } },
+          h('span', { style: { display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, t(item.labelKey)),
+          h('span', { style: { display: 'block', marginTop: '2px', fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, t(item.metaKey))),
+        h('span', {
+          'aria-hidden': 'true',
+          style: {
+            marginLeft: 'auto', width: '12px', height: '12px', borderRadius: '50%', flex: '0 0 auto',
+            border: item.id === type.id ? '1px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l2)',
+            background: item.id === type.id ? 'var(--dsw-alias-brand-primary)' : 'transparent',
+          },
+        }))
+      const back = step > 1
+        ? h('div', { style: { display: 'flex', gap: '8px' } },
+            h('button', {
+              type: 'button', className: 'wb-btn',
+              style: { ...s.badge, cursor: 'pointer', padding: '6px 12px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' },
+              onClick: () => setStep(step - 1),
+            }, t('createBack')))
+        : null
+      let content = null
+      if (step === 1) {
+        content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+          h('input', {
+            style: { ...s.textarea, minHeight: '40px', padding: '8px 12px' },
+            value: name,
+            placeholder: t('createNamePlaceholder'),
+            onChange: event => props.onChangeName(event.target.value),
+            onKeyDown: event => { if (event.key === 'Enter' && canCreate) advance() },
+            autoFocus: true,
+          }),
+          h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('createHint')))
+      } else if (step === 2) {
+        content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            h('span', { style: { fontSize: '13px', fontWeight: 600 } }, t('createTypeTitle')),
+            h('span', { style: { ...s.muted, fontSize: '12px' } }, t('createTypeHint'))),
+          h('div', {
+            role: 'radiogroup',
+            'aria-label': t('createStepType'),
+            style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px' },
+          }, PROJECT_TYPES.map(card)),
+          h('div', {
+            style: {
+              display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', borderRadius: '9px',
+              border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-layer-1)',
+            },
+          },
+            fact(t('typeFactPersona'), t(type.personaKey)),
+            fact(t('typeFactTools'), t(type.toolsKey)),
+            fact(t('typeFactMemory'), t(type.memoryKey)),
+            fact(t('typeFactTemplate'), t(type.templateKey))),
+          back)
+      } else {
+        content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+          h('label', { style: { display: 'flex', flexDirection: 'column', gap: '5px' } },
+            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, t('createWorkspaceLabel')),
+            h('div', { style: { display: 'flex', gap: '8px', alignItems: 'stretch' } },
+              h('input', {
+                style: { ...s.textarea, minHeight: '38px', padding: '8px 12px', flex: '1 1 auto', minWidth: 0 },
+                value: workspace,
+                placeholder: t('createWorkspacePlaceholder'),
+                onChange: event => props.onChangeWorkspace(event.target.value),
+              }),
+              h('button', {
+                type: 'button',
+                className: 'wb-btn',
+                disabled: Boolean(props.picking),
+                title: t('createWorkspacePick'),
+                onClick: () => { if (typeof props.onPickWorkspace === 'function') props.onPickWorkspace() },
+                style: {
+                  ...s.badge, minHeight: '38px', padding: '0 12px', flex: '0 0 auto',
+                  cursor: props.picking ? 'default' : 'pointer', opacity: props.picking ? 0.6 : 1,
+                  display: 'inline-flex', alignItems: 'center',
+                },
+              }, props.picking ? t('createWorkspacePicking') : t('createWorkspacePick')))),
+          h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('createWorkspaceHint')),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', padding: '10px 12px', borderRadius: '9px', border: '1px solid var(--dsw-alias-border-l2)' } },
+            h('span', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, t('createAdvanced')),
+            fact(t('createPresetLabel'), type.preset ?? t('createDeployDefault')),
+            fact(t('createToolsLabel'), t(type.toolsKey)),
+            fact(t('createModelLabel'), t('createDeployDefault')),
+            fact(t('createMemoryLabel'), t(type.memoryKey))),
+          h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
+            t('createSummary').replace('{name}', String(name ?? '').trim() || t('createNamePlaceholder')).replace('{type}', t(type.labelKey))),
+          h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
+            t('createSummaryWorkspace').replace('{workspace}', String(workspace ?? '').trim() || t('createAutoWorkspace'))),
+          back)
+      }
+      const confirmLabel = step < 3 ? t('createNext') : (busy ? t('createConfirm') : t('createConfirm'))
       return h(Dialog, {
         title: t('createDialogTitle'),
-        error: props.error,
-        busy: props.busy,
-        confirmLabel: t('createConfirm'),
+        width: step === 1 ? '440px' : '560px',
+        error,
+        busy,
+        confirmLabel,
         cancelLabel: t('createCancel'),
         onCancel: props.onCancel,
-        onConfirm: props.onConfirm,
+        onConfirm: advance,
       },
-        h('input', {
-          style: { ...s.textarea, minHeight: '40px', padding: '8px 12px' },
-          value: props.name,
-          placeholder: t('createNamePlaceholder'),
-          onChange: event => props.onChange(event.target.value),
-          onKeyDown: event => { if (event.key === 'Enter') props.onConfirm() },
-          autoFocus: true,
-        }),
-        h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('createHint')))
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '14px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' } },
+            stepChip(1, t('createStepBasic')),
+            h('span', { style: { flex: '1 1 10px', height: '1px', background: 'var(--dsw-alias-border-l2)', minWidth: '10px' } }),
+            stepChip(2, t('createStepType')),
+            h('span', { style: { flex: '1 1 10px', height: '1px', background: 'var(--dsw-alias-border-l2)', minWidth: '10px' } }),
+            stepChip(3, t('createStepWorkspace'))),
+          content))
     }
 
     /** The task entry, as a dialog instead of a permanently open textarea. */
@@ -3434,6 +3691,9 @@ window.__ModuleLoader__.load({
       const [jobId, setJobId] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
       const [cardName, setCardName] = useState('')
+      const [cardKind, setCardKind] = useState('software')
+      const [cardWorkspace, setCardWorkspace] = useState('')
+      const [cardPicking, setCardPicking] = useState(false)
       const [createError, setCreateError] = useState(null)
       const [creating, setCreating] = useState(false)
       const [deleteTarget, setDeleteTarget] = useState(null)
@@ -3501,6 +3761,31 @@ window.__ModuleLoader__.load({
         }
       }, [reload])
 
+      // Native folder picker: the host owns the dialog (Electron or the OS
+      // helper), so the browser never guesses a path from a text field alone.
+      const pickCardWorkspace = useCallback(async () => {
+        setCreateError(null)
+        setCardPicking(true)
+        try {
+          const response = await fetch('/workbench/pick-path', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ kind: 'directory', prompt: t('createWorkspacePick') }),
+          })
+          const body = await response.json().catch(() => null)
+          if (!response.ok) {
+            if (response.status === 501) throw new Error(t('createWorkspacePickFailed'))
+            throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          }
+          if (typeof body?.path === 'string' && body.path !== '') setCardWorkspace(body.path)
+        } catch (error) {
+          setCreateError(String(error?.message ?? error))
+        } finally {
+          setCardPicking(false)
+        }
+      }, [t])
+
       const createCard = useCallback(async () => {
         setCreateError(null)
         if (!cardName.trim()) {
@@ -3513,12 +3798,21 @@ window.__ModuleLoader__.load({
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ name: cardName.trim() }),
+            body: JSON.stringify({
+              name: cardName.trim(),
+              kind: cardKind,
+              ...(cardWorkspace.trim() === '' ? {} : { workspace: cardWorkspace.trim() }),
+            }),
           })
           const body = await response.json().catch(() => null)
-          if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          if (!response.ok) {
+            if (body?.error?.code === 'path-not-allowed') throw new Error(t('createWorkspaceOutside'))
+            throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          }
           setDialogOpen(false)
           setCardName('')
+          setCardKind('software')
+          setCardWorkspace('')
           setSelected(body.projectId)
           setTasksOpen(false)
           setJobId(null)
@@ -3528,7 +3822,7 @@ window.__ModuleLoader__.load({
         } finally {
           setCreating(false)
         }
-      }, [cardName, reload, t])
+      }, [cardName, cardKind, cardWorkspace, reload, t])
 
       const removeCard = useCallback(async () => {
         if (deleteTarget === null) return
@@ -3734,12 +4028,18 @@ window.__ModuleLoader__.load({
             onDelete: () => { setDeleteError(null); setDeleteTarget(item) },
           }))),
         dialogOpen
-          ? h(CreateCardDialog, {
+          ? h(CreateProjectWizard, {
               t,
               name: cardName,
+              kind: cardKind,
+              workspace: cardWorkspace,
               error: createError,
               busy: creating,
-              onChange: value => setCardName(value),
+              onChangeName: value => setCardName(value),
+              onChangeKind: value => setCardKind(value),
+              onChangeWorkspace: value => setCardWorkspace(value),
+              onPickWorkspace: pickCardWorkspace,
+              picking: cardPicking,
               onCancel: () => setDialogOpen(false),
               onConfirm: createCard,
             })
@@ -3790,7 +4090,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       // Test seam: the panel has no unit tests otherwise, and a stray variable
       // in a component body only surfaces as a blank slot at runtime.
-      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, CreateCardDialog, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph },
+      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph },
       apply(ctx) {
         hostCtx = ctx
         // Session services are optional: the panel and its sidebar entry must

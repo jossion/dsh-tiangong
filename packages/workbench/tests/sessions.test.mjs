@@ -419,3 +419,59 @@ test('session usage is folded from persisted assistant messages', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('a project type chooses the preset and masks its global tools', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const created = []
+    const restricted = []
+    const agent = {
+      id: 'session-new',
+      ctx: {
+        get(name) {
+          if (name !== 'tools') return undefined
+          return {
+            schemas: () => [{ name: 'blender_render' }, { name: 'workbench_state' }, { name: 'spawn_teammate' }],
+            restrict: filter => { restricted.push(filter) },
+          }
+        },
+      },
+    }
+    const ctx = fakeCtx({
+      sessionController: {
+        async create(options) {
+          created.push(options)
+          return { sessionId: 'session-new', agentPreset: options.agentPreset }
+        },
+        async resolveAgent() { return { agent } },
+        async selectModel() { return {} },
+        async modelCatalog() { return { default: { provider: 'deepseek', model: 'flash' } } },
+      },
+      agentPresets: {
+        async resolve(wanted) { return { id: wanted ?? 'standard' } },
+        async select() {},
+      },
+      agents: { get: () => agent },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir, { agentPreset: 'fallback' }), events: noEvents, now: () => 1_000 })
+    const result = await bridge.ensureProjectSession({
+      id: 'p1', title: '文案项目', projectKind: 'copy',
+      profile: (await import('../profiles.js')).resolveProjectProfile('copy'),
+    })
+    assert.equal(result.ok, true)
+    assert.equal(created[0].agentPreset, 'workbench-copy', 'the project profile picks the preset')
+    assert.deepEqual(restricted, [{ deny: ['blender_render', 'spawn_teammate'] }], 'only registered global names are denied')
+    assert.equal(result.policy.applied, true)
+
+    // custom keeps the deployment fallback and masks nothing
+    const custom = await bridge.ensureProjectSession({
+      id: 'p2', title: '自定义', projectKind: 'custom',
+      profile: (await import('../profiles.js')).resolveProjectProfile('custom'),
+    })
+    assert.equal(custom.ok, true)
+    assert.equal(created[1].agentPreset, 'fallback')
+    assert.equal(restricted.length, 1, 'custom adds no mask')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

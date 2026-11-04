@@ -373,6 +373,8 @@ export function foldTasks(events) {
           workspace: null,
           workspaceId: null,
           sessionId: null,
+          projectKind: null,
+          profile: null,
           status: 'created',
           createdAt: null,
           updatedAt: null,
@@ -382,6 +384,10 @@ export function foldTasks(events) {
       if (typeof event.title === 'string' && event.title !== '') project.title = event.title
       if (typeof event.brief === 'string' && event.brief !== '') project.brief = event.brief
       if (typeof event.artifactDir === 'string' && event.artifactDir !== '') project.artifactDir = event.artifactDir
+      if (typeof event.projectKind === 'string' && event.projectKind !== '') project.projectKind = event.projectKind
+      if (event.profile !== null && typeof event.profile === 'object' && !Array.isArray(event.profile)) {
+        project.profile = { ...event.profile }
+      }
       if (typeof event.workspace === 'string' && event.workspace !== '') project.workspace = event.workspace
       if (typeof event.workspaceId === 'string' && event.workspaceId !== '') project.workspaceId = event.workspaceId
       if (event.workspaceId === null) project.workspaceId = null
@@ -669,6 +675,8 @@ export function buildBoard(events, options = {}) {
         workspace: meta?.workspace ?? null,
         workspaceId: meta?.workspaceId ?? null,
         sessionId: meta?.sessionId ?? null,
+        projectKind: meta?.projectKind ?? null,
+        profile: meta?.profile ?? null,
         status: meta?.status ?? 'created',
         previewUrl: meta?.previewUrl ?? null,
         createdAt: meta?.createdAt ?? null,

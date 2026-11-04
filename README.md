@@ -11,6 +11,8 @@ a series of auditable tasks with their own cockpits — not one opaque run.
 
 ## Capabilities
 
+- **Project types** — software delivery, copy writing and custom; a type binds the lead-agent preset, a
+  global-tool mask and a workspace template (`AGENTS.md` + `docs/`).
 - **Requirement intake** — text or `.md` / `.markdown` / `.txt` (≤512 KiB); a change request can name
   the delivered task it follows (`parentJobId` + `kind`).
 - **Closed loop** — bind a delivery session → the main agent plans a DAG → ready cards go to child
