@@ -1140,10 +1140,27 @@ export function apply(ctx, row) {
         }
       }
       const skillsService = optional('skills')
+      const agents = optional('agents')
       let installed = []
       if (skillsService && typeof skillsService.list === 'function') {
         try {
-          installed = await skillsService.list({})
+          // Prefer the project's delivery agent; before one exists, any live
+          // agent's scope still merges the global/bundled skill layers.
+          let scope
+          const projectForScope = projectId === ''
+            ? null
+            : buildBoard(await events.all()).projects.find(item => item.id === projectId)
+          if (projectForScope?.sessionId && agents && typeof agents.get === 'function') {
+            scope = agents.get(projectForScope.sessionId)
+          }
+          if (scope === undefined && agents && typeof agents.list === 'function') {
+            scope = (agents.list() ?? []).find(candidate => candidate?.id !== undefined)
+          }
+          const cwd = projectForScope?.workspace ?? null
+          installed = await skillsService.list({
+            ...(scope === undefined ? {} : { scope }),
+            ...(typeof cwd === 'string' && cwd !== '' ? { cwd } : {}),
+          })
         } catch {
           installed = []
         }
@@ -1756,7 +1773,7 @@ export function apply(ctx, row) {
         schema: { type: 'string' },
         render: (_args, value) => [{ type: 'text', text: String(value) }],
       },
-      async execute(input) {
+      async execute(input, exec) {
         const query = String(input?.query ?? '').trim()
         if (query === '') throw new Error('query is required')
 
@@ -1773,7 +1790,18 @@ export function apply(ctx, row) {
         const skillsService = optional('skills')
         if (skillsService && typeof skillsService.list === 'function') {
           try {
-            catalog = await skillsService.list({})
+            // A skill read merges the global layer with the viewing agent's
+            // preset layers; the scope is the Agent itself.
+            const scope = exec?.agent
+            let cwd = null
+            const working = optional('workingDirectory')
+            if (scope !== undefined && working && typeof working.ensure === 'function') {
+              try { cwd = await working.ensure(scope, exec?.signal) } catch { cwd = null }
+            }
+            catalog = await skillsService.list({
+              ...(scope === undefined ? {} : { scope }),
+              ...(typeof cwd === 'string' && cwd !== '' ? { cwd } : {}),
+            })
             session = rankSkills(catalog, query)
           } catch {
             catalog = []
