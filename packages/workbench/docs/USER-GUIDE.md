@@ -142,6 +142,37 @@ README 写玩法。
 
 ![驾驶舱：5/5 完成，交付物面板](assets/demo-cockpit-done.png)
 
+### 交付效果
+
+![游戏开始界面](assets/game-start.png)
+
+![游戏进行中：击落敌机 +10 分](assets/game-play.png)
+
+### 本次交付统计
+
+| 指标 | 数值 |
+|---|---|
+| 开始 → 交付 | **7 分 28 秒**（12:33:42 → 12:41:09） |
+| Token 消耗 | 输入 **28,444** / 输出 **17,444** / 合计 **45,888** |
+| 任务卡 | 1 张容器卡 + 5 张工作项卡，**5/5 完成** |
+| 交付物 | **7 个**（`index.html`、`style.css`、`logic.js`、`game.js`、`tests/logic.test.mjs`、`README.md`、`design.json`） |
+| 测试证据 | `node --test tests/logic.test.mjs`：**6/6 通过**，退出码 0 |
+| 人工介入 | 0 次（无「等你决定」） |
+
+**技能调用记录**
+
+| 执行者 | 卡片 | 要求技能 | 实际调用 |
+|---|---|---|---|
+| 主 agent（规划） | — | 技能池 3 个 | `create-implementation-plan` |
+| backend | 实现 `logic.js` | — | `create-implementation-plan`、`review-and-refactor`、`documentation-writer` |
+| backend | 编写 `tests/logic.test.mjs` | — | `review-and-refactor` |
+| frontend | 实现界面 `index.html` / `style.css` / `game.js` | — | `premium-frontend-ui`（模型自行发现） |
+| backend | 编写 `README.md` | `documentation-writer` | `documentation-writer` |
+| qa | 只读验收 | `review-and-refactor` | `review-and-refactor` |
+
+> 这个 demo 也说明了技能机制的两面：规划按技能池强制分配（README/验收卡），子 agent 还会按任务内容
+> 自己发现更贴切的技能（界面卡加载了 `premium-frontend-ui`），实际调用都进账本、可对照。
+
 ## 5. 看懂任务卡
 
 - **状态**：`自动·规划中` → `自动·执行中` → `已完成` / `等你决定` / `已暂停` / `已终止`。

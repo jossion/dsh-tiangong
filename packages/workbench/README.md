@@ -38,6 +38,10 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task session chat](docs/assets/chat.png)
 
+A full end-to-end walkthrough — a delivered Raiden-style browser game with the actual game
+screenshots, delivery time, token usage and per-card skill calls — is in
+[docs/USER-GUIDE.md §4.6](docs/USER-GUIDE.md#46-demo从创建到交付雷电小游戏).
+
 ## The closed loop
 
 The plugin is the scheduler; the main agent decides; child agents execute. Every tick is one pure
