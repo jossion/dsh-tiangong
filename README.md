@@ -9,6 +9,8 @@ a series of auditable tasks with their own cockpits — not one opaque run.
 
 ![Task board](packages/workbench/docs/assets/board.png)
 
+> 国内镜像 / China mirror: [gitee.com/jossion/dsh-tiangong](https://gitee.com/jossion/dsh-tiangong)
+
 ## Capabilities
 
 - **Project types** — software delivery, copy writing and custom; a type binds the lead-agent preset, a
