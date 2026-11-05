@@ -2924,6 +2924,22 @@ window.__ModuleLoader__.load({
               h('span', { style: { ...s.stageMeta, marginLeft: 'auto' } }, ago(item.lastActiveAt))),
             h('span', { style: { ...s.stageMeta, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
               item.note || `${item.owner || 'agent'}`))))
+      // Running is the normal, healthy state of a live cockpit, so it gets the
+      // success tone (soft green fill + bright green label) instead of the
+      // neutral gray chip that read as "disabled". Paused and stopped keep
+      // their warning/error tones; done stays neutral because the green here
+      // means "working right now", not "finished".
+      const runningTone = {
+        color: '#7ee2a8',
+        background: 'rgba(46,160,67,.22)',
+        borderColor: 'rgba(46,160,67,.6)',
+      }
+      const stoppedTone = { color: STATUS_COLOR.blocked, background: 'rgba(248,81,73,.10)', borderColor: 'rgba(248,81,73,.45)' }
+      const statusTone = scopeStatus === 'paused'
+        ? { color: STATUS_COLOR.waiting, background: 'rgba(210,153,34,.12)', borderColor: 'rgba(210,153,34,.45)' }
+        : scopeStatus === 'cancelled' || scopeStatus === 'failed' ? stoppedTone
+        : scopeStatus === 'done' ? { color: 'var(--dsw-alias-label-primary)' }
+        : runningTone
       const statusChip = scopeStatus === 'paused' ? t('statusPaused')
         : scopeStatus === 'cancelled' ? t('statusCancelled')
         : scopeStatus === 'done' ? t('boardDone')
@@ -3086,10 +3102,23 @@ window.__ModuleLoader__.load({
             style: {
               ...s.badge,
               // Muted gray on a dark chip was the blur; the status must read.
-              color: scopeStatus === 'paused' ? STATUS_COLOR.waiting : scopeStatus === 'cancelled' ? STATUS_COLOR.blocked : 'var(--dsw-alias-label-primary)',
-              fontWeight: 600, letterSpacing: '.2px', borderColor: 'var(--dsw-alias-border-l2)',
+              ...statusTone,
+              fontWeight: 600, letterSpacing: '.2px',
+              borderColor: statusTone.borderColor ?? 'var(--dsw-alias-border-l2)',
             },
-          }, statusChip),
+          },
+            // A running cockpit gets a live dot as well as the green tone: the
+            // label alone read like a static category, not an active state.
+            ['paused', 'cancelled', 'done', 'failed'].includes(scopeStatus)
+              ? null
+              : h('span', {
+                  'aria-hidden': 'true',
+                  style: {
+                    width: '6px', height: '6px', borderRadius: '50%', flex: '0 0 auto',
+                    background: '#7ee2a8', boxShadow: '0 0 6px rgba(126,226,168,.9)',
+                  },
+                }),
+            statusChip),
           running > 0
             ? h('span', {
                 style: { ...s.badge, color: STATUS_COLOR.done, borderColor: STATUS_COLOR.done, animation: 'wb-glow 1.4s ease-in-out infinite' },

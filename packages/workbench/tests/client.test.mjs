@@ -1345,3 +1345,39 @@ test('the workspace step offers a native folder picker next to the path field', 
   walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
   assert.ok(parts.join(' ').includes('createWorkspaceHint'), 'the hint explains typing and picking')
 })
+
+test('a running cockpit status reads as a green highlight, not a disabled chip', () => {
+  const page = ProjectDetail({
+    t,
+    project: { ...project, status: 'started' },
+    summary: {},
+    events: [],
+    onBack: () => {},
+    onControl: () => {},
+  })
+  let chip = null
+  walk(page, node => {
+    const children = node.props?.children
+    if (children === 'statusRunning' || (Array.isArray(children) && children.includes('statusRunning'))) chip = node.props
+  })
+  assert.ok(chip, 'the running chip is rendered')
+  assert.equal(chip.style.color, '#7ee2a8', 'the label uses the bright success green')
+  assert.match(String(chip.style.background), /46,160,67/, 'the chip carries a soft success fill')
+  assert.equal(chip.style.borderColor, 'rgba(46,160,67,.6)', 'and a success border')
+
+  const cancelled = ProjectDetail({
+    t,
+    project: { ...project, status: 'cancelled' },
+    summary: {},
+    events: [],
+    onBack: () => {},
+    onControl: () => {},
+  })
+  let stopped = null
+  walk(cancelled, node => {
+    const children = node.props?.children
+    if (children === 'statusCancelled' || (Array.isArray(children) && children.includes('statusCancelled'))) stopped = node.props
+  })
+  assert.ok(stopped, 'the stopped chip is rendered')
+  assert.notEqual(stopped.style.color, '#7ee2a8', 'a stopped scope is not green')
+})
