@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -1016,6 +1016,118 @@ test('a project card can be deleted without erasing its history', async () => {
     await projectsRoute.handler(deleteRequest({}), missing)
     assert.equal(missing.status, 400)
     assert.equal(JSON.parse(missing.body).error.code, 'bad-request')
+  })
+})
+
+test('a permanent delete removes the project directory and still writes the tombstone', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+    const stateRoute = routes.find(route => route.path === STATE_PATH)
+
+    const workspace = join(dataDir, 'delivered')
+    mkdirSync(join(workspace, 'src'), { recursive: true })
+    await writeFile(join(workspace, 'src', 'app.js'), 'console.log(1)\n')
+
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '彻底删除', workspace }), created)
+    assert.equal(created.status, 201)
+    const { projectId } = JSON.parse(created.body)
+
+    const state = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, state)
+    const card = JSON.parse(state.body).board.projects.find(item => item.id === projectId)
+    assert.equal(card.projectDir, workspace, 'the card names the exact folder a purge removes')
+
+    const purged = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId, purge: true }), purged)
+    assert.equal(purged.status, 200)
+    const body = JSON.parse(purged.body)
+    assert.equal(body.purged, true)
+    assert.equal(body.directory, workspace)
+    assert.equal(body.directoryDeleted, true)
+    assert.equal(existsSync(workspace), false, 'the directory is gone, not only the card')
+
+    const after = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, after)
+    assert.equal(JSON.parse(after.body).board.projects.length, 0)
+
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    assert.ok(
+      (await log.all()).some(line => line.kind === 'project' && line.event === 'deleted' && line.projectId === projectId),
+      'the ledger still records the deletion',
+    )
+  })
+})
+
+test('removing only the card keeps the project directory on disk', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+
+    const workspace = join(dataDir, 'kept')
+    mkdirSync(workspace, { recursive: true })
+    await writeFile(join(workspace, 'keep.txt'), 'keep\n')
+
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '保留目录', workspace }), created)
+    const { projectId } = JSON.parse(created.body)
+
+    const deleted = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId }), deleted)
+    assert.equal(deleted.status, 200)
+    assert.deepEqual(JSON.parse(deleted.body), { deleted: true, projectId })
+    assert.equal(existsSync(join(workspace, 'keep.txt')), true, 'a card delete is not a file delete')
+  })
+})
+
+test('a permanent delete refuses a folder that holds the ledger', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+    const stateRoute = routes.find(route => route.path === STATE_PATH)
+
+    // Any allowed absolute directory can be named as a workspace, including
+    // the data dir itself. The second confirmation must not be able to take
+    // the ledger with it, so the host refuses independently of the UI.
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '受保护', workspace: dataDir }), created)
+    const { projectId } = JSON.parse(created.body)
+
+    const refused = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId, purge: true }), refused)
+    assert.equal(refused.status, 403)
+    assert.equal(JSON.parse(refused.body).error.code, 'unsafe-target')
+    assert.equal(existsSync(join(dataDir, 'events.jsonl')), true, 'the ledger is intact')
+
+    const state = fakeResponse()
+    await stateRoute.handler({ method: 'GET' }, state)
+    assert.ok(
+      JSON.parse(state.body).board.projects.some(project => project.id === projectId),
+      'a refused purge leaves the card so the user can retry differently',
+    )
+  })
+})
+
+test('a permanent delete of a project with no folder yet still removes the card', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const projectsRoute = routes.find(route => route.path === PROJECTS_PATH)
+
+    const created = fakeResponse()
+    await projectsRoute.handler(postRequest({ name: '还没开工' }), created)
+    const { projectId } = JSON.parse(created.body)
+
+    const purged = fakeResponse()
+    await projectsRoute.handler(deleteRequest({ projectId, purge: true }), purged)
+    assert.equal(purged.status, 200)
+    const body = JSON.parse(purged.body)
+    assert.equal(body.directory, join(dataDir, 'apps', projectId), 'the default app folder is the target')
+    assert.equal(body.directoryDeleted, false, 'nothing to remove yet')
   })
 })
 

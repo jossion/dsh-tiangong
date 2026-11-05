@@ -40,7 +40,7 @@ const module = factory(name => {
   if (name !== 'react') throw new Error(`unexpected require: ${name}`)
   return stubReact()
 })
-const { ProjectCard, ProjectDetail, ProjectHome, TaskList, TeamGraphCard, FloatingPanel, Dialog, JobConversation, createSessionBridge, teamGraph } = module.__components
+const { ProjectCard, ProjectDetail, ProjectHome, TaskList, TeamGraphCard, FloatingPanel, Dialog, DeleteProjectDialog, JobConversation, createSessionBridge, teamGraph } = module.__components
 
 const project = {
   id: 'prj_1',
@@ -704,6 +704,66 @@ test('a project card carries its delete control in the corner', () => {
   control.props.onClick({ stopPropagation: () => { stopped = true } })
   assert.equal(stopped, true, 'clicking delete must not open the project')
   assert.deepEqual(deleted, ['x'])
+})
+
+test('the delete dialog offers permanent removal only behind a second step', () => {
+  const opened = []
+  const page = DeleteProjectDialog({
+    t: key => key,
+    project: { ...project, projectDir: '/Users/me/app' },
+    step: 'card',
+    error: null,
+    busy: false,
+    onCancel: () => {},
+    onBack: () => {},
+    onNext: () => opened.push('next'),
+    onRemoveCard: () => opened.push('card'),
+    onPurge: () => opened.push('purge'),
+  })
+  const labels = []
+  const dangers = []
+  walk(page, node => {
+    const props = node.props || {}
+    if (node.type === 'button') labels.push(props.children)
+    if (props['data-danger'] === 'true') dangers.push(node)
+  })
+  assert.ok(labels.includes('deleteCardConfirm'), 'step one still removes the card')
+  assert.ok(labels.includes('deleteCardDangerAction'), 'step one offers the permanent path')
+  assert.equal(dangers.length, 1, 'exactly one destructive control on step one')
+  dangers[0].props.onClick()
+  assert.deepEqual(opened, ['next'], 'the destructive click only advances to step two')
+})
+
+test('the second delete step names the folder and asks again', () => {
+  const t = key => key === 'deletePurgeDirectory' ? '将删除目录：{path}' : key
+  const confirmed = []
+  const page = DeleteProjectDialog({
+    t,
+    project: { ...project, projectDir: '/Users/me/app' },
+    step: 'purge',
+    error: null,
+    busy: false,
+    onCancel: () => {},
+    onBack: () => {},
+    onNext: () => {},
+    onRemoveCard: () => {},
+    onPurge: () => confirmed.push('purge'),
+  })
+  const labels = []
+  const texts = []
+  walk(page, node => {
+    const props = node.props || {}
+    if (node.type === 'button') labels.push(props.children)
+    if (typeof props.children === 'string') texts.push(props.children)
+  })
+  assert.ok(labels.includes('deletePurgeConfirm'), 'the destructive confirm is a separate step')
+  assert.ok(labels.includes('deletePurgeBack'), 'the second step can go back')
+  assert.ok(texts.some(text => text.includes('/Users/me/app')), 'the exact folder is named')
+  let danger = null
+  walk(page, node => { if (node.props && node.props['data-danger'] === 'true') danger = node })
+  assert.ok(danger, 'the final confirm is marked destructive for the initial-focus guard')
+  danger.props.onClick()
+  assert.deepEqual(confirmed, ['purge'])
 })
 
 test('the plugin only requires the services it cannot run without', () => {

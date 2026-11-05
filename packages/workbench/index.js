@@ -17,9 +17,10 @@
 import { existsSync, statSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdir, readdir, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createStore } from './store.js'
 import { createDelivery } from './delivery.js'
 import { createEventLog, summarize } from './events.js'
@@ -33,6 +34,13 @@ import { createDispatcher } from './dispatch.js'
 import { PROJECT_KINDS, recommendedSkillsFor, resolveProjectProfile } from './profiles.js'
 
 export const inject = ['llm', 'tools']
+
+/**
+ * Where this bundle lives. A permanent delete must never take the running
+ * plugin (or the checkout it was linked from) with it, so the purge guard
+ * treats that directory as off limits.
+ */
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url))
 
 /**
  * The plugin's tunables, in the official form: `export const Config` makes the
@@ -166,6 +174,22 @@ export const JOB_SKILLS_PATH = '/workbench/job-skills'
 function resolveDataDir(configured) {
   if (configured) return configured
   return join(homedir(), '.dsh', 'workbench')
+}
+
+/** Where default project directories live: `<dataDir>/apps` unless configured. */
+function resolveAppsRoot(config) {
+  const configured = typeof config?.appsRoot === 'string' ? config.appsRoot.trim() : ''
+  return resolve(configured === '' ? join(resolveDataDir(config?.dataDir), 'apps') : configured)
+}
+
+/**
+ * The directory a project owns: the workspace a person bound, or the default
+ * app root the delivery loop scaffolds on first use. The board shows it in the
+ * delete dialog, and the purge route removes exactly this path.
+ */
+function projectDirectory(project, config) {
+  const chosen = typeof project?.workspace === 'string' ? expandHome(project.workspace) : ''
+  return resolve(chosen !== '' ? chosen : join(resolveAppsRoot(config), String(project?.id ?? 'app')))
 }
 
 function sendJson(response, status, value) {
@@ -315,6 +339,67 @@ function expandHome(value) {
 function pathAllowed(target, roots) {
   const resolved = resolve(target)
   return roots.some(root => resolved === root || resolved.startsWith(`${root}${sep}`))
+}
+
+/** True when `candidate` is `path` itself or one of its ancestors. */
+function containsPath(candidate, path) {
+  return candidate === path || path.startsWith(`${candidate}${sep}`)
+}
+
+/**
+ * Why deleting `target` recursively would be wrong, or null when it is safe.
+ *
+ * Two confirmations in the panel protect against a slip, not against a wrong
+ * value: a project workspace may be any allowed directory, including home. So
+ * the host independently refuses a target that is, or contains, something the
+ * workbench itself depends on.
+ */
+function purgeRefusal(target, ctx, config) {
+  const resolved = resolve(target)
+  // `/` and drive roots are never a project directory.
+  if (dirname(resolved) === resolved) return `refusing to delete a filesystem root: ${resolved}`
+  const inside = (parent, child) => child === parent || child.startsWith(`${parent}${sep}`)
+  const dataDir = resolve(resolveDataDir(config.dataDir))
+  const appsRoot = resolveAppsRoot(config)
+  const dshHome = resolve(join(homedir(), '.dsh'))
+  // The DSH home holds profiles, the ledger, requirement documents and the
+  // plugin install. Only project app folders below `appsRoot` are project-owned
+  // there; a different subdirectory (however it became a workspace) is shared
+  // infrastructure, not something a card may erase.
+  if (inside(dshHome, resolved) && !inside(appsRoot, resolved)) {
+    return `refusing to delete ${resolved}: it is inside ${dshHome} but not a project app folder`
+  }
+  const guarded = [
+    resolve(homedir()),
+    dshHome,
+    dataDir,
+    appsRoot,
+    PLUGIN_DIR,
+    resolve(process.cwd()),
+  ]
+  for (const path of guarded) {
+    if (containsPath(resolved, path)) return `refusing to delete ${resolved}: it contains ${path}`
+  }
+  if (!pathAllowed(resolved, allowedRoots(ctx, config))) {
+    return `outside the allowed roots: ${resolved}`
+  }
+  return null
+}
+
+/**
+ * Remove one project directory. A missing directory is a success (the purge
+ * still removes the card); `rm` unlinks a symlink instead of following it, so
+ * this can never walk out of the guarded path above.
+ */
+async function purgeDirectory(target) {
+  try {
+    await lstat(target)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { directory: target, directoryDeleted: false }
+    throw error
+  }
+  await rm(target, { recursive: true, force: true, maxRetries: 3 })
+  return { directory: target, directoryDeleted: true }
 }
 
 export const pickScript = (kind, prompt) => {
@@ -508,9 +593,15 @@ export function apply(ctx, row) {
         const summary = summarize(all)
         const board = buildBoard(all)
         // Newest first is what the stream renders; the file stays oldest-first.
+        // Each card carries the exact folder a permanent delete would remove,
+        // so the dialog never has to guess the default app root.
+        const projects = board.projects.map(project => ({
+          ...project,
+          projectDir: projectDirectory(project, config),
+        }))
         sendJson(response, 200, {
           summary,
-          board,
+          board: { ...board, projects },
           planning: delivery.isRunning(),
           speech: speechInfo(),
           events: [...all].slice(-30).reverse(),
@@ -561,10 +652,18 @@ export function apply(ctx, row) {
       }
       // Delete appends a `deleted` event; the ledger stays append-only and the
       // board projection simply stops showing that project from then on.
+      //
+      // `{ purge: true }` additionally removes the project directory from disk.
+      // It is opt-in and the panel asks twice before sending it: removing a
+      // card is reversible (the history is still in the ledger), deleting the
+      // files is not.
       if (request.method === 'DELETE') {
         let projectId = ''
+        let purge = false
         try {
-          projectId = String((await readJsonBody(request))?.projectId ?? '').trim()
+          const body = await readJsonBody(request)
+          projectId = String(body?.projectId ?? '').trim()
+          purge = body?.purge === true
         } catch (error) {
           sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
           return
@@ -574,12 +673,30 @@ export function apply(ctx, row) {
           return
         }
         const board = buildBoard(await events.all())
-        if (!board.projects.some(item => item.id === projectId)) {
+        const project = board.projects.find(item => item.id === projectId)
+        if (project === undefined) {
           sendJson(response, 404, { error: { code: 'not-found', message: 'no such project' } })
           return
         }
+        let purged = null
+        if (purge) {
+          const target = projectDirectory(project, config)
+          const refusal = purgeRefusal(target, ctx, config)
+          if (refusal !== null) {
+            sendJson(response, 403, { error: { code: 'unsafe-target', message: refusal } })
+            return
+          }
+          try {
+            purged = await purgeDirectory(target)
+          } catch (error) {
+            sendJson(response, 500, { error: { code: 'delete-failed', message: String(error?.message ?? error) } })
+            return
+          }
+        }
         await events.append(projectEvent({ projectId, event: 'deleted', ts: new Date().toISOString() }))
-        sendJson(response, 200, { deleted: true, projectId })
+        sendJson(response, 200, purge
+          ? { deleted: true, purged: true, projectId, directory: purged.directory, directoryDeleted: purged.directoryDeleted }
+          : { deleted: true, projectId })
         return
       }
       if (request.method !== 'POST') {

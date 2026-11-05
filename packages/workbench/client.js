@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: '@jos/workbench',
+  id: '@jossionliu/workbench',
   factory(require) {
     const React = require('react')
     const h = React.createElement
@@ -159,10 +159,23 @@ window.__ModuleLoader__.load({
         createCard: 'Create',
         deleteCard: 'Delete project',
         deleteCardTitle: 'Delete “{name}”?',
-        deleteCardBody: 'The card disappears from Tiangong; files on disk are not deleted.',
-        deleteCardConfirm: 'Delete card',
-        deleteCardWorkspace: 'Workspace: {workspace}',
-        deleteCardNoWorkspace: 'Workspace: not set (no app files to keep)',
+        deleteCardBody: '“Remove card” only takes the project off the Tiangong board and keeps every file on disk. “Delete permanently” removes the project directory as well.',
+        deleteCardConfirm: 'Remove card',
+        deleteCardWorkspace: 'Project folder: {workspace}',
+        deleteCardNoWorkspace: 'Project folder: not set (the default app folder is used)',
+        deleteCardDangerTitle: 'Delete permanently (cannot be undone)',
+        deleteCardDangerHint: 'Removes the project directory from disk. You will be asked to confirm again.',
+        deleteCardDangerAction: 'Delete permanently…',
+        deletePurgeTitle: 'Confirm permanent deletion of “{name}”',
+        deletePurgeBody: 'The project directory and everything inside it will be deleted. This cannot be undone.',
+        deletePurgeDirectory: 'Folder to delete: {path}',
+        deletePurgeMissing: 'Folder to delete: not created yet — only the card is removed.',
+        deletePurgeWarning: 'The ledger keeps one deletion record; the files do not come back.',
+        deletePurgeConfirm: 'Delete permanently',
+        deletePurgeBusy: 'Deleting…',
+        deletePurgeBack: 'Back',
+        deletePurgeUnsafe: 'The host protects this folder, so nothing was deleted:',
+        deletePurgeStale: 'The host did not delete the folder (restart DSH to load the new host code). The card was removed.',
         createDialogTitle: 'Create a project',
         createNamePlaceholder: 'e.g. Company operations',
         createHint: 'The project gets its own workspace, capability profile and delivery session. Submit a requirement and the loop takes over.',
@@ -508,11 +521,24 @@ window.__ModuleLoader__.load({
         backToOverview: '← 概览',
         createCard: '创建',
         deleteCard: '删除项目',
-        deleteCardTitle: '删除项目卡「{name}」？',
-        deleteCardBody: '卡片会从天工看板移除；项目在磁盘上的文件不会被删除。',
-        deleteCardConfirm: '删除卡片',
-        deleteCardWorkspace: '工作区：{workspace}',
-        deleteCardNoWorkspace: '工作区：未设置（没有应用文件）',
+        deleteCardTitle: '删除项目「{name}」？',
+        deleteCardBody: '「仅移除卡片」只把项目从天工看板移除，磁盘上的文件全部保留；「彻底删除」会连同项目目录一起删除。',
+        deleteCardConfirm: '仅移除卡片',
+        deleteCardWorkspace: '项目目录：{workspace}',
+        deleteCardNoWorkspace: '项目目录：未设置（使用默认应用目录）',
+        deleteCardDangerTitle: '彻底删除（不可恢复）',
+        deleteCardDangerHint: '删除磁盘上的项目目录，需要再次确认。',
+        deleteCardDangerAction: '彻底删除项目…',
+        deletePurgeTitle: '再次确认：彻底删除「{name}」？',
+        deletePurgeBody: '项目目录及其中所有文件会被永久删除，无法恢复。',
+        deletePurgeDirectory: '将删除目录：{path}',
+        deletePurgeMissing: '将删除目录：尚未创建 —— 只会移除看板卡片。',
+        deletePurgeWarning: '账本只保留一条删除记录，文件不会回来。',
+        deletePurgeConfirm: '永久删除',
+        deletePurgeBusy: '正在删除…',
+        deletePurgeBack: '返回',
+        deletePurgeUnsafe: '这个目录受保护，没有删除：',
+        deletePurgeStale: '宿主没有执行目录删除（需要重启 DSH 更新宿主代码）；项目卡已移除。',
         createDialogTitle: '创建项目',
         createNamePlaceholder: '例如：公司管理',
         createHint: '创建后自动分配工作区、能力包和专属交付会话；提交需求就进入自动闭环。',
@@ -822,6 +848,36 @@ window.__ModuleLoader__.load({
         color: '#ffffff', font: 'inherit', fontSize: '13px', fontWeight: 600, letterSpacing: '.2px',
         whiteSpace: 'nowrap', cursor: 'pointer',
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,.26), 0 6px 16px rgba(63,92,255,.28)',
+      },
+      // Destructive controls stay outline/tinted, never a filled red block: the
+      // theme's error token is a mid red, and white text on it would not reach
+      // 4.5:1. Red text on a 10% red wash keeps the warning while staying legible.
+      dangerButton: {
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        alignSelf: 'flex-start', padding: '8px 16px', borderRadius: '9px',
+        border: '1px solid var(--dsw-alias-state-error-primary)',
+        background: 'rgba(242,90,90,.12)',
+        color: 'var(--dsw-alias-state-error-primary)', font: 'inherit', fontSize: '13px',
+        fontWeight: 600, letterSpacing: '.2px', whiteSpace: 'nowrap', cursor: 'pointer',
+      },
+      dangerLink: {
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        alignSelf: 'flex-start', minHeight: '32px', padding: '6px 12px', borderRadius: '8px',
+        border: '1px solid rgba(242,90,90,.38)',
+        background: 'rgba(242,90,90,.08)',
+        color: 'var(--dsw-alias-state-error-primary)', font: 'inherit', fontSize: '12.5px',
+        fontWeight: 600, letterSpacing: '.2px', whiteSpace: 'nowrap', cursor: 'pointer',
+      },
+      dangerZone: {
+        display: 'flex', flexDirection: 'column', gap: '8px',
+        paddingTop: '12px', borderTop: '1px solid var(--dsw-alias-border-l1)',
+      },
+      monoPath: {
+        margin: 0, padding: '8px 10px', borderRadius: '8px',
+        background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-border-l1)',
+        color: 'var(--dsw-alias-label-primary)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: '12px', lineHeight: '1.5', wordBreak: 'break-all',
       },
       error: { color: 'var(--dsw-alias-state-error-primary)', fontSize: '13px', margin: 0 },
       list: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
@@ -3575,7 +3631,10 @@ window.__ModuleLoader__.load({
             .filter(el => el.disabled !== true && el.offsetParent !== null)
         // Prefer the field the user came here to fill over the first button.
         const field = panel === null ? null : panel.querySelector('textarea, input, select')
-        const target = field !== null && field.disabled !== true ? field : controls()[0]
+        // A destructive control must never be what Enter hits when a dialog
+        // opens: skip anything marked `data-danger` when choosing the target.
+        const safe = controls().filter(el => el.getAttribute?.('data-danger') !== 'true')
+        const target = field !== null && field.disabled !== true ? field : (safe[0] ?? controls()[0])
         if (target !== undefined && target !== null && typeof target.focus === 'function') target.focus()
         return () => {
           body.style.overflow = previousOverflow
@@ -3629,17 +3688,77 @@ window.__ModuleLoader__.load({
           h('h2', { style: s.sectionTitle }, title),
           children,
           error ? h('p', { style: s.error }, error) : null,
-          h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+          h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' } },
             props.cancel === false
               ? null
-              : h('button', { type: 'button', className: 'wb-btn', style: { ...s.badge, cursor: 'pointer', padding: '6px 14px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' }, onClick: onCancel }, cancelLabel),
+              : h('button', { type: 'button', className: 'wb-btn', style: { ...s.badge, background: 'transparent', cursor: 'pointer', padding: '6px 14px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' }, onClick: onCancel }, cancelLabel),
             h('button', {
               type: 'button',
               className: 'wb-btn',
-              style: { ...s.button, opacity: busy ? 0.6 : 1 },
+              'data-danger': props.danger === true ? 'true' : undefined,
+              style: { ...(props.danger === true ? s.dangerButton : s.button), opacity: busy ? 0.6 : 1 },
               disabled: busy,
               onClick: onConfirm,
             }, confirmLabel))))
+    }
+
+    /**
+     * The project delete surface, in two deliberate steps.
+     *
+     * Step one removes the card (a ledger tombstone; files survive). Step two
+     * is the irreversible one: it names the exact folder the host will remove
+     * and asks again. The panel never sends `purge: true` from a single click.
+     */
+    function DeleteProjectDialog(props) {
+      const { t, project, step, error, busy } = props
+      const name = project.title || project.id
+      const directory = typeof project.projectDir === 'string' && project.projectDir !== ''
+        ? project.projectDir
+        : (typeof project.workspace === 'string' ? project.workspace : '')
+      if (step === 'purge') {
+        return h(Dialog, {
+          title: t('deletePurgeTitle').replace('{name}', name),
+          error,
+          busy,
+          width: '460px',
+          confirmLabel: busy ? t('deletePurgeBusy') : t('deletePurgeConfirm'),
+          cancelLabel: t('deletePurgeBack'),
+          danger: true,
+          onCancel: props.onBack,
+          onConfirm: props.onPurge,
+        },
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            h('p', { style: { ...s.muted, margin: 0 } }, t('deletePurgeBody')),
+            directory === ''
+              ? h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('deletePurgeMissing'))
+              : h('p', { style: s.monoPath }, t('deletePurgeDirectory').replace('{path}', directory)),
+            h('p', { style: { ...s.muted, margin: 0, fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } },
+              t('deletePurgeWarning'))))
+      }
+      return h(Dialog, {
+        title: t('deleteCardTitle').replace('{name}', name),
+        error,
+        busy,
+        width: '460px',
+        confirmLabel: t('deleteCardConfirm'),
+        cancelLabel: t('cancel'),
+        onCancel: props.onCancel,
+        onConfirm: props.onRemoveCard,
+      },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+          h('p', { style: { ...s.muted, margin: 0 } }, t('deleteCardBody')),
+          h('p', { style: { ...s.muted, margin: 0, fontSize: '12px', wordBreak: 'break-all' } },
+            t('deleteCardWorkspace').replace('{workspace}', directory === '' ? t('deleteCardNoWorkspace') : directory)),
+          h('div', { style: s.dangerZone },
+            h('p', { style: { margin: 0, fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, t('deleteCardDangerTitle')),
+            h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('deleteCardDangerHint')),
+            h('button', {
+              type: 'button',
+              className: 'wb-btn',
+              'data-danger': 'true',
+              style: s.dangerLink,
+              onClick: props.onNext,
+            }, t('deleteCardDangerAction')))))
     }
 
     /** Default skill pool per project kind (mirrors profiles.js). */
@@ -4154,6 +4273,9 @@ window.__ModuleLoader__.load({
       const [createError, setCreateError] = useState(null)
       const [creating, setCreating] = useState(false)
       const [deleteTarget, setDeleteTarget] = useState(null)
+      // 'card' = remove the card; 'purge' = the second, irreversible step that
+      // also deletes the project directory.
+      const [deleteStep, setDeleteStep] = useState('card')
       const [deleteBusy, setDeleteBusy] = useState(false)
       const [deleteError, setDeleteError] = useState(null)
       const [jobDialogOpen, setJobDialogOpen] = useState(false)
@@ -4285,7 +4407,7 @@ window.__ModuleLoader__.load({
         }
       }, [cardName, cardKind, cardWorkspace, reload, t])
 
-      const removeCard = useCallback(async () => {
+      const removeCard = useCallback(async (purge = false) => {
         if (deleteTarget === null) return
         setDeleteError(null)
         setDeleteBusy(true)
@@ -4294,10 +4416,19 @@ window.__ModuleLoader__.load({
             method: 'DELETE',
             headers: { 'content-type': 'application/json' },
             credentials: 'same-origin',
-            body: JSON.stringify({ projectId: deleteTarget.id }),
+            body: JSON.stringify(purge ? { projectId: deleteTarget.id, purge: true } : { projectId: deleteTarget.id }),
           })
           const body = await response.json().catch(() => null)
-          if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          if (!response.ok) {
+            if (body?.error?.code === 'unsafe-target') throw new Error(`${t('deletePurgeUnsafe')} ${body.error.message}`)
+            throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          }
+          // A host that predates purging answers 200 after removing only the
+          // card: report that honestly instead of pretending the files are gone.
+          if (purge && body?.purged !== true) {
+            reload()
+            throw new Error(t('deletePurgeStale'))
+          }
           if (selected === deleteTarget.id) {
             setSelected(null)
             setTasksOpen(false)
@@ -4305,13 +4436,14 @@ window.__ModuleLoader__.load({
             setJobId(null)
           }
           setDeleteTarget(null)
+          setDeleteStep('card')
           reload()
         } catch (error) {
           setDeleteError(String(error?.message ?? error))
         } finally {
           setDeleteBusy(false)
         }
-      }, [deleteTarget, reload, selected])
+      }, [deleteTarget, reload, selected, t])
 
       const pickJobFile = useCallback(file => {
         setJobError(null)
@@ -4537,7 +4669,7 @@ window.__ModuleLoader__.load({
             t,
             project: item,
             onOpen: () => { setSelected(item.id); setTasksOpen(false); setShowHome(false); setJobId(null) },
-            onDelete: () => { setDeleteError(null); setDeleteTarget(item) },
+            onDelete: () => { setDeleteError(null); setDeleteStep('card'); setDeleteTarget(item) },
           }))),
         dialogOpen
           ? h(CreateProjectWizard, {
@@ -4558,19 +4690,18 @@ window.__ModuleLoader__.load({
           : null,
         deleteTarget === null
           ? null
-          : h(Dialog, {
-              title: t('deleteCardTitle').replace('{name}', deleteTarget.title || deleteTarget.id),
+          : h(DeleteProjectDialog, {
+              t,
+              project: deleteTarget,
+              step: deleteStep,
               error: deleteError,
               busy: deleteBusy,
-              confirmLabel: t('deleteCardConfirm'),
-              cancelLabel: t('cancel'),
-              onCancel: () => { setDeleteTarget(null); setDeleteError(null) },
-              onConfirm: removeCard,
-            },
-              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-                h('p', { style: { ...s.muted, margin: 0 } }, t('deleteCardBody')),
-                h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
-                  t('deleteCardWorkspace').replace('{workspace}', deleteTarget.workspace || t('deleteCardNoWorkspace'))))),
+              onCancel: () => { setDeleteTarget(null); setDeleteStep('card'); setDeleteError(null) },
+              onBack: () => { setDeleteStep('card'); setDeleteError(null) },
+              onNext: () => { setDeleteError(null); setDeleteStep('purge') },
+              onRemoveCard: () => removeCard(false),
+              onPurge: () => removeCard(true),
+            }),
       )
     }
 
@@ -4602,7 +4733,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       // Test seam: the panel has no unit tests otherwise, and a stray variable
       // in a component body only surfaces as a blank slot at runtime.
-      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, SkillPickerDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph, fillHeightFor },
+      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, DeleteProjectDialog, TaskDialog, TaskDetailDialog, SkillPickerDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph, fillHeightFor },
       apply(ctx) {
         hostCtx = ctx
         // Session services are optional: the panel and its sidebar entry must

@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-05** (workbench `0.8.4`).
+> Capability inventory below is current as of **2026-11-05** (workbench `0.8.5`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -247,7 +247,7 @@ All routes are same-origin and sit behind the host connection fence.
 | `/workbench/state` | GET | projection: summary + board + events + planning + speech |
 | `/workbench/requirements` | POST | closed-loop intake (new task or change request), 202 |
 | `/workbench/start` | POST | legacy host-side planner, 202 (the panel no longer calls it) |
-| `/workbench/projects` | POST/DELETE | create/delete a project card (delete writes a tombstone line) |
+| `/workbench/projects` | POST/DELETE | create a project card; DELETE removes it (tombstone line) and `{ purge: true }` also deletes its project directory |
 | `/workbench/control` | POST | `pause` / `resume` / `cancel` for a project or one job |
 | `/workbench/decide` | POST | approve / reject a gate |
 | `/workbench/job-config` | POST | job title / workspace / workspaceId / sessionId |
@@ -267,6 +267,11 @@ All routes are same-origin and sit behind the host connection fence.
 - Legacy artifacts: `~/.dsh/workbench/deliveries/<runId>/{roles,design,review}.json`.
 - Project workspaces: the project directory (or `<dataDir>/apps/<projectId>`); delivered file paths
   are workspace-relative in cards and artifacts.
+- Deleting a project card is a ledger tombstone: the files stay. The card's delete dialog also offers
+  **permanent deletion**, which asks a second time, names the exact folder and then removes that
+  project directory from disk. The host refuses the purge when the folder is, or contains, the home
+  directory, the data dir, the apps root, this plugin's own directory or the host's cwd — and for any
+  folder inside `~/.dsh` that is not below the apps root (profiles, ledger, requirement documents).
 - Views (rail state, chat open state) live in `localStorage`; nothing important lives only there.
 
 ## Configuration
@@ -313,7 +318,7 @@ Add the package with DSH’s Plugin Manager (`install_bundle`) — or, for a CLI
 dsh plugin --profile <profile> add /path/to/dsh-tiangong/packages/workbench
 ```
 
-Restart DSH, then open **Plugins → Installed** to confirm `@jos/workbench` is active and the
+Restart DSH, then open **Plugins → Installed** to confirm `@jossionliu/workbench` is active and the
 **工作台 / Tiangong** entry appears in the sidebar. For voice input, enable the DSH
 `voice-input-bundle` as well; the workbench shares its model and settings.
 

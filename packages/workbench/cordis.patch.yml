@@ -9,7 +9,7 @@
 # so a deployment can retune a persona without patching the package.
 - insert:
     - id: workbench
-      name: '@jos/workbench'
+      name: '@jossionliu/workbench'
       config:
         dataDir: ''
 

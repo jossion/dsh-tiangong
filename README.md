@@ -43,7 +43,7 @@ git clone https://github.com/jossion/dsh-tiangong.git
 dsh plugin --profile <profile> add /path/to/dsh-tiangong/packages/workbench
 ```
 
-Restart DSH, confirm `@jos/workbench` is active, and open the **天工 / Tiangong** entry in the sidebar.
+Restart DSH, confirm `@jossionliu/workbench` is active, and open the **天工 / Tiangong** entry in the sidebar.
 For voice input, enable DSH's `voice-input-bundle` as well; the workbench shares its model and settings.
 
 ## Documentation
