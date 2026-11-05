@@ -723,8 +723,9 @@ export function apply(ctx, row) {
               // deployment: its tool surface resolves teammates, not children.
               const ts = new Date().toISOString()
               for (const child of children) {
+                const parentSession = (project.jobs.find(item => item.id === child.jobId)?.sessionId) ?? project.sessionId
                 if (action === 'pause') {
-                  const stopped = await sessionBridge.interruptChild(child.childSessionId)
+                  const stopped = await sessionBridge.interruptChild(parentSession, child.childSessionId)
                   await events.append(taskEvent({
                     event: 'progress',
                     taskId: child.id,
@@ -736,7 +737,7 @@ export function apply(ctx, row) {
                       : `paused; child session ${child.childSessionId} could not be interrupted (${stopped.error})`,
                   }))
                 } else {
-                  const resumed = await sessionBridge.continueChild(child.childSessionId, CONTINUE_CHILD_TEXT)
+                  const resumed = await sessionBridge.continueChild(parentSession, child.childSessionId, CONTINUE_CHILD_TEXT)
                   await events.append(taskEvent({
                     event: 'progress',
                     taskId: child.id,
@@ -1815,7 +1816,8 @@ export function apply(ctx, row) {
         const scopeJob = scopeProject?.jobs?.find(item => item.id === target.jobId)
         const paused = (scopeJob?.status ?? scopeProject?.status) === 'paused'
         if (paused) {
-          const stopped = await sessionBridge.interruptChild(childSessionId)
+          const parentSession = scopeJob?.sessionId ?? scopeProject?.sessionId ?? null
+          const stopped = await sessionBridge.interruptChild(parentSession, childSessionId)
           await events.append(taskEvent({
             event: 'progress',
             taskId,

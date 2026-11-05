@@ -476,45 +476,48 @@ test('a project type chooses the preset and masks its global tools', async () =>
   }
 })
 
-test('interrupting a child cancels its turn through the session controller', async () => {
+test('interrupting a child uses the subagents service with the parent as ancestor', async () => {
   const calls = []
+  const agent = { id: 'session-parent' }
   const ctx = fakeCtx({
-    sessionController: {
-      async cancel(request) {
-        calls.push(request)
-        return { accepted: true }
+    agents: { get: id => (id === 'session-parent' ? agent : undefined) },
+    subagents: {
+      interrupt(target, authority) {
+        calls.push({ target, authority })
       },
     },
   })
   const bridge = createSessionBridge({ ctx, config: { dataDir: '/tmp/x' }, events: noEvents })
-  const result = await bridge.interruptChild('child-1')
-  assert.deepEqual(result, { ok: true, via: 'session-controller' })
-  assert.deepEqual(calls, [{ sessionId: 'child-1' }])
+  const result = await bridge.interruptChild('session-parent', 'child-1')
+  assert.deepEqual(result, { ok: true, via: 'subagents' })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].target, 'child-1')
+  assert.equal(calls[0].authority.kind, 'ancestor')
+  assert.equal(calls[0].authority.agent, agent)
 
   const missing = await createSessionBridge({ ctx: fakeCtx({}), config: { dataDir: '/tmp/x' }, events: noEvents })
-    .interruptChild('child-1')
+    .interruptChild('session-parent', 'child-1')
   assert.equal(missing.ok, false)
   assert.match(missing.error, /unavailable/)
 })
 
-test('continuing a child prompts the same session with the continue text', async () => {
+test('continuing a child messages it from the parent agent', async () => {
   const calls = []
-  const signals = []
+  const agent = { id: 'session-parent' }
   const ctx = fakeCtx({
-    sessionController: {
-      async prompt(request, signal) {
-        calls.push(request)
-        signals.push(signal)
-        return { accepted: true }
+    agents: { get: id => (id === 'session-parent' ? agent : undefined) },
+    subagents: {
+      async sendMessage(sender, targetId, content, options) {
+        calls.push({ sender, targetId, content, options })
+        return 'msg-1'
       },
     },
   })
   const bridge = createSessionBridge({ ctx, config: { dataDir: '/tmp/x' }, events: noEvents })
-  const result = await bridge.continueChild('child-1', 'continue the card')
+  const result = await bridge.continueChild('session-parent', 'child-1', 'continue the card')
   assert.equal(result.ok, true)
-  assert.equal(calls[0].sessionId, 'child-1')
-  assert.equal(calls[0].mode, 'queue')
+  assert.equal(result.messageId, 'msg-1')
+  assert.equal(calls[0].sender, agent)
+  assert.equal(calls[0].targetId, 'child-1')
   assert.equal(calls[0].content[0].text, 'continue the card')
-  assert.equal(typeof calls[0].requestId, 'string')
-  assert.equal(typeof signals[0]?.throwIfAborted, 'function', 'prompt receives an AbortSignal')
 })

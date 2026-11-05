@@ -367,47 +367,46 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   /**
    * Stop one child's current turn without destroying its session.
    *
-   * This is the host's own cancel door (the same one the panel uses), not a
-   * model tool: the delivery lead's tool surface in a team deployment can carry
-   * a same-named teammate tool, and asking the model to interrupt its own child
-   * then fails with "active teammate not found". The controller has no such
-   * ambiguity, and it keeps the transcript and pending inbox for resume.
+   * Addressed through the subagents service with the delivery lead as the
+   * authorising ancestor: child sessions live in the subagent activation graph,
+   * not in the ordinary session controller (which answers `session not found`
+   * for them), and the lead's own `interrupt_agent` tool resolves teammates in a
+   * team deployment. `ancestor` authority names the exact live parent instead.
    */
-  async function interruptChild(sessionId) {
-    if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, error: 'no child session' }
-    const controller = optional('sessionController')
-    if (controller === null || controller === undefined || typeof controller.cancel !== 'function') {
-      return { ok: false, error: 'sessionController.cancel unavailable' }
+  async function interruptChild(parentSessionId, childSessionId) {
+    if (typeof parentSessionId !== 'string' || parentSessionId === '') return { ok: false, error: 'no parent session' }
+    if (typeof childSessionId !== 'string' || childSessionId === '') return { ok: false, error: 'no child session' }
+    const subagents = optional('subagents')
+    if (subagents === null || subagents === undefined || typeof subagents.interrupt !== 'function') {
+      return { ok: false, error: 'subagents.interrupt unavailable' }
     }
+    const parent = await resolveAgent(parentSessionId)
+    if (parent === null) return { ok: false, error: 'delivery agent is not live' }
     try {
-      const receipt = await controller.cancel({ sessionId })
-      return { ok: receipt?.accepted === true, via: 'session-controller' }
+      subagents.interrupt(childSessionId, { kind: 'ancestor', agent: parent })
+      return { ok: true, via: 'subagents' }
     } catch (error) {
-      return { ok: false, error: `cancel failed: ${String(error?.message ?? error)}` }
+      return { ok: false, error: `interrupt failed: ${String(error?.message ?? error)}` }
     }
   }
 
   /**
-   * Continue a child that pause interrupted. `prompt` resumes a cold child
-   * session from persistence, so this also works after the host restarted.
+   * Continue a child that pause interrupted. The parent Agent is the sender, so
+   * an idle or cold child resumes from its own persisted history and the card is
+   * not re-executed from its prompt.
    */
-  async function continueChild(sessionId, text) {
-    if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, error: 'no child session' }
-    const controller = optional('sessionController')
-    if (controller === null || controller === undefined || typeof controller.prompt !== 'function') {
-      return { ok: false, error: 'sessionController.prompt unavailable' }
+  async function continueChild(parentSessionId, childSessionId, text) {
+    if (typeof parentSessionId !== 'string' || parentSessionId === '') return { ok: false, error: 'no parent session' }
+    if (typeof childSessionId !== 'string' || childSessionId === '') return { ok: false, error: 'no child session' }
+    const subagents = optional('subagents')
+    if (subagents === null || subagents === undefined || typeof subagents.sendMessage !== 'function') {
+      return { ok: false, error: 'subagents.sendMessage unavailable' }
     }
+    const parent = await resolveAgent(parentSessionId)
+    if (parent === null) return { ok: false, error: 'delivery agent is not live' }
     try {
-      // prompt(request, signal): the host implementation dereferences the
-      // signal, so omitting it fails with "throwIfAborted of undefined".
-      const abort = new AbortController()
-      const receipt = await controller.prompt({
-        requestId: randomUUID(),
-        sessionId,
-        mode: 'queue',
-        content: [{ type: 'text', text: String(text) }],
-      }, abort.signal)
-      return { ok: receipt?.accepted === true, via: 'session-controller' }
+      const messageId = await subagents.sendMessage(parent, childSessionId, [{ type: 'text', text: String(text) }], {})
+      return { ok: true, via: 'subagents', messageId }
     } catch (error) {
       return { ok: false, error: `continue failed: ${String(error?.message ?? error)}` }
     }

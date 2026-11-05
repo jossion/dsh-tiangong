@@ -1243,11 +1243,19 @@ test('workbench_bind_child records the child session that carries a card', async
 
 test('pausing a job with bound children records a checkpoint and cancels the child', async () => {
   await withDataDir(async dataDir => {
-    const calls = { cancel: [], prompt: [] }
+    const calls = { interrupt: [], message: [], prompt: [] }
+    const agent = { id: 's1' }
     const { ctx, tools, routes } = fakeContext({
       services: {
+        agents: { get: id => (id === 's1' ? agent : undefined) },
+        subagents: {
+          interrupt(target, authority) { calls.interrupt.push({ target, authority }) },
+          async sendMessage(sender, targetId, content) {
+            calls.message.push({ sender, targetId, content })
+            return 'msg-1'
+          },
+        },
         sessionController: {
-          async cancel({ sessionId }) { calls.cancel.push(sessionId); return { accepted: true } },
           async prompt(request) { calls.prompt.push(request); return { accepted: true } },
         },
       },
@@ -1274,13 +1282,17 @@ test('pausing a job with bound children records a checkpoint and cancels the chi
     const checkpoint = lines.find(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a')
     assert.ok(checkpoint, 'pause writes a checkpoint on the in-flight card')
     assert.match(checkpoint.notes, /paused; child session child-1 interrupted/)
-    assert.deepEqual(calls.cancel, ['child-1'], 'pause cancels the exact child session')
+    assert.equal(calls.interrupt.length, 1, 'pause interrupts the exact child')
+    assert.equal(calls.interrupt[0].target, 'child-1')
+    assert.equal(calls.interrupt[0].authority.kind, 'ancestor')
+    assert.equal(calls.interrupt[0].authority.agent, agent)
 
-    // Resuming prompts the same child with "continue", not a fresh card run.
+    // Resuming messages the same child with "continue", not a fresh card run.
     await control.handler(postRequest({ projectId: 'p1', jobId: 'j1', action: 'resume' }), fakeResponse())
-    assert.deepEqual(calls.prompt.map(request => request.sessionId), ['child-1'])
-    assert.match(calls.prompt[0].content[0].text, /Continue the card you were working on/)
-    assert.equal(calls.prompt[0].content[0].text, CONTINUE_CHILD_TEXT)
+    assert.equal(calls.message.length, 1)
+    assert.equal(calls.message[0].sender, agent)
+    assert.equal(calls.message[0].targetId, 'child-1')
+    assert.equal(calls.message[0].content[0].text, CONTINUE_CHILD_TEXT)
     const resumedLine = (await createEventLog(join(dataDir, 'events.jsonl')).all())
       .filter(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a').at(-1)
     assert.match(resumedLine.notes, /resumed; child session child-1 continued/)
@@ -1291,13 +1303,13 @@ test('pausing a job with bound children records a checkpoint and cancels the chi
 
 test('a child bound while its job is paused is stopped immediately', async () => {
   await withDataDir(async dataDir => {
-    const calls = { cancel: [], prompt: [] }
+    const calls = { interrupt: [] }
+    const agent = { id: 's1' }
     const { ctx, tools, routes } = fakeContext({
       services: {
-        sessionController: {
-          async cancel({ sessionId }) { calls.cancel.push(sessionId); return { accepted: true } },
-          async prompt(request) { calls.prompt.push(request); return { accepted: true } },
-        },
+        agents: { get: id => (id === 's1' ? agent : undefined) },
+        subagents: { interrupt(target, authority) { calls.interrupt.push({ target, authority }) } },
+        sessionController: { async prompt() { return { accepted: true } } },
       },
     })
     apply(ctx, { dataDir })
@@ -1315,7 +1327,9 @@ test('a child bound while its job is paused is stopped immediately', async () =>
     const bind = tools.find(tool => tool.name === 'workbench_bind_child')
     const bound = JSON.parse(await bind.execute({ taskId: 'j1:wi:a', childSessionId: 'child-9' }))
     assert.equal(bound.paused, true)
-    assert.deepEqual(calls.cancel, ['child-9'], 'the late child is cancelled right away')
+    assert.equal(calls.interrupt.length, 1, 'the late child is interrupted right away')
+    assert.equal(calls.interrupt[0].target, 'child-9')
+    assert.equal(calls.interrupt[0].authority.kind, 'ancestor')
     const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
     const note = lines.filter(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a').at(-1)
     assert.match(note.notes, /bound after pause/)

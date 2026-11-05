@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.6`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.7`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -110,14 +110,16 @@ Pause is not only a queue switch. Every card handed out with a bound child sessi
 (`workbench_bind_child`) is paused the same way:
 
 - **Pause** writes a checkpoint (`paused; child session … interrupted`) on each
-  in-flight card and stops the child's current turn through the host session
-  controller (`sessionController.cancel`). Its session, inbox and transcript stay
-  intact. This does not go through a model tool: in a team deployment the delivery
-  lead's `interrupt_agent` resolves teammates, not children.
-- **Resume** prompts the same child session with `sessionController.prompt`
-  ("continue, do not restart the card"), passing the AbortSignal the host
-  requires; a cold child is resumed from persistence, so resume also works after
-  a host restart. The card is not re-executed from its prompt.
+  in-flight card and stops the child's current turn through the subagents
+  service: `subagents.interrupt(child, { kind: 'ancestor', agent: deliveryLead })`.
+  Child sessions live in that activation graph, not in the ordinary session
+  controller, so cancelling them by session id answers "session not found"; and a
+  model-side `interrupt_agent` resolves teammates in a team deployment. The
+  ancestor authority names the exact live parent Agent instead.
+- **Resume** sends the child a message from that same parent Agent
+  (`subagents.sendMessage(lead, child, "continue, do not restart the card")`).
+  An idle or cold child resumes from its own persisted history, so the card is
+  not re-executed from its prompt, and resume also works after a host restart.
 - Pause can race the spawn: the card is claimed before its child id exists. When
   `workbench_bind_child` runs while the job is paused, the plugin stops that
   child immediately and records the checkpoint, so a paused job cannot keep
