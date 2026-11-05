@@ -1424,3 +1424,30 @@ test('a task detail sheet shows instructions, acceptance, dependencies and the c
     '合并 PR', 'taskOpenChild',
   ]) assert.ok(text.includes(expected), `the sheet shows ${expected}`)
 })
+
+test('canvas work cards open the detail sheet', () => {
+  const opened = []
+  const page = TeamGraphCard({
+    t, project, scope: project, onOpenTask: id => opened.push(id),
+  })
+  const clickable = []
+  walk(page, node => {
+    if (typeof node.props?.onClick === 'function' && node.props?.title === 'taskOpenHint') clickable.push(node)
+  })
+  assert.ok(clickable.length > 0, 'work cards on the canvas are clickable')
+  clickable[0].props.onClick()
+  assert.equal(opened.length, 1, 'a click asks for that card')
+  assert.ok(opened[0], 'the opener receives the card id')
+})
+
+test('the cockpit canvas receives the card opener', () => {
+  const page = ProjectDetail({
+    t, project, summary: {}, events: [],
+    onBack: () => {}, onControl: () => {},
+  })
+  let wired = false
+  walk(page, node => {
+    if (typeof node.props?.onClick === 'function' && node.props?.title === 'taskOpenHint') wired = true
+  })
+  assert.equal(wired, true, 'clicking a canvas card is wired to the sheet')
+})

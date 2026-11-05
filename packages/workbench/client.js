@@ -1645,11 +1645,21 @@ window.__ModuleLoader__.load({
      * SVG text cannot give. Positions are view state (localStorage), never
      * ledger state — the log records facts, not where a card sits.
      */
+    /** Walk a task tree by id; the canvas and the rail share one detail sheet. */
+    function findTaskNode(nodes, id) {
+      for (const node of Array.isArray(nodes) ? nodes : []) {
+        if (node.id === id) return node
+        const hit = findTaskNode(node.children, id)
+        if (hit !== null) return hit
+      }
+      return null
+    }
+
     function TeamGraphCard(props) {
       // `project` owns identity (the saved layout key); `scope` owns the cards.
       // Reading roots off the project put every job's cards in one cockpit, so
       // one job's graph showed another job's labels again.
-      const { t, project, scope = project, panels = [], fill = false } = props
+      const { t, project, scope = project, panels = [], fill = false, onOpenTask } = props
       const [expanded, setExpanded] = useState({})
       const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
       const [positions, setPositions] = useState({})
@@ -1663,6 +1673,9 @@ window.__ModuleLoader__.load({
       const storageKey = `workbench:positions:v${LAYOUT_VERSION}:${project.id}:${scope.id ?? ''}`
       const viewportRef = useRef(null)
       const dragRef = useRef(null)
+      // A card is both draggable and clickable: a drag that moved must not also
+      // open the detail sheet on pointerup.
+      const clickGuardRef = useRef(false)
       const layout = teamGraph(scope, { expanded })
 
       useEffect(() => {
@@ -1741,6 +1754,7 @@ window.__ModuleLoader__.load({
         const rect = viewportRef.current?.getBoundingClientRect()
         dragRef.current = {
           ...payload,
+          moved: false,
           startX: event.clientX,
           startY: event.clientY,
           worldX: rect ? (event.clientX - rect.left - view.x) / view.scale : 0,
@@ -1757,6 +1771,7 @@ window.__ModuleLoader__.load({
       const onPointerMove = event => {
         const drag = dragRef.current
         if (drag === null) return
+        if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4) drag.moved = true
         if (drag.kind === 'pan') {
           setView(current => ({ ...current, x: drag.ox + (event.clientX - drag.startX), y: drag.oy + (event.clientY - drag.startY) }))
           return
@@ -1779,6 +1794,7 @@ window.__ModuleLoader__.load({
 
       const endDrag = event => {
         if (dragRef.current === null) return
+        clickGuardRef.current = dragRef.current.kind === 'card' && dragRef.current.moved === true
         if (dragRef.current.kind !== 'pan') writePositions(storageKey, positions)
         dragRef.current = null
         event.currentTarget.releasePointerCapture?.(event.pointerId)
@@ -1973,7 +1989,15 @@ window.__ModuleLoader__.load({
                 key: card.id,
                 className: card.status === 'active' ? 'wb-card-active' : undefined,
                 onPointerDown: event => beginDrag(event, { kind: 'card', id: card.id, origin: at }),
-                onClick: card.expandable ? () => toggleLane(card.owner) : undefined,
+                onClick: card.expandable
+                  ? () => toggleLane(card.owner)
+                  : onOpenTask
+                    ? () => {
+                        if (clickGuardRef.current) { clickGuardRef.current = false; return }
+                        onOpenTask(card.id)
+                      }
+                    : undefined,
+                title: onOpenTask ? t('taskOpenHint') : undefined,
                 style: {
                   ...cardStyle(card.color),
                   left: `${at.x}px`,
@@ -1981,7 +2005,7 @@ window.__ModuleLoader__.load({
                   width: `${card.w}px`,
                   height: `${card.h}px`,
                   borderColor: card.status === 'active' ? card.color : 'var(--dsw-alias-border-l1)',
-                  cursor: card.expandable ? 'pointer' : 'grab',
+                  cursor: card.expandable || onOpenTask ? 'pointer' : 'grab',
                   opacity: card.overflow ? 0.72 : 1,
                 },
               },
@@ -3290,7 +3314,13 @@ window.__ModuleLoader__.load({
                   leftPanels.map(panel => h(RailPanel, { key: panel.id, t, projectId: project.id, ...panel })))
               : null,
             h('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex' } },
-              h(TeamGraphCard, { t, project, scope, panels: [], fill: true })),
+              h(TeamGraphCard, {
+                t, project, scope, panels: [], fill: true,
+                onOpenTask: id => {
+                  const task = findTaskNode(scope.roots, id)
+                  if (task !== null) setOpenTask(task)
+                },
+              })),
             showRails
               ? h('div', { style: { flex: '0 0 300px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', minHeight: 0 } },
                   rightPanels.map(panel => h(RailPanel, { key: panel.id, t, projectId: project.id, ...panel })))
