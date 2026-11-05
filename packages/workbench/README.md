@@ -312,7 +312,13 @@ Requires DSH **0.2.1-rc.0 or newer** (`engines.dsh`).
 git clone https://github.com/jossion/dsh-tiangong.git
 ```
 
-Add the package with DSH’s Plugin Manager (`install_bundle`) — or, for a CLI profile:
+Published on npm as **`@jossionliu/workbench`**. Install it with DSH’s Plugin Manager or from a CLI profile:
+
+```bash
+dsh plugin --profile <profile> add @jossionliu/workbench@0.8.5
+```
+
+For a local checkout, link the package directory instead:
 
 ```bash
 dsh plugin --profile <profile> add /path/to/dsh-tiangong/packages/workbench

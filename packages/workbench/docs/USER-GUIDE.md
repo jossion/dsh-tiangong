@@ -29,7 +29,14 @@
 ## 2. 安装与启用
 
 1. 本机已装好 DSH（`dsh` ≥ 0.2.1-rc.0）。
-2. 在插件管理里安装本包（或 profile 里 `link:` 本目录），并确保 bundles 里有 `@jossionliu/workbench`。
+2. 从 npm 安装（推荐）：
+
+   ```bash
+   dsh plugin --profile desktop add @jossionliu/workbench@0.8.5
+   ```
+
+   也可以在插件管理里安装；本地开发用 profile 里的 `link:` 指向本目录。装完确保 bundles 里有
+   `@jossionliu/workbench`。
 3. **完全退出 DSH（⌘Q）再启动**，侧栏出现「天工」入口。
 4. 想用对话栏的语音输入，还要启用 DSH 的语音输入 bundle（`voice-input-bundle`）；
    天工与主聊天**共用同一套语音模型和设置**，准备一次即可。
