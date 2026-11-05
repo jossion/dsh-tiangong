@@ -75,6 +75,25 @@ window.__ModuleLoader__.load({
         taskSectionArtifacts: 'Artifacts',
         taskSectionGates: 'Gates / decisions',
         taskSectionSkills: 'Skills used',
+        taskSectionRequiredSkills: 'Required skills',
+        taskRequiredSkillsNone: 'none assigned',
+        skillsLabel: 'Skills',
+        skillsNone: 'none selected',
+        skillsPick: 'Choose skills',
+        skillsTitle: 'Choose skills',
+        skillsHint: 'Recommended skills are preselected; up to 6. Uninstalled skills are highlighted; planning will ask before an install or a fallback.',
+        skillsSearchPlaceholder: 'Search installed skills…',
+        skillsRecommended: 'Recommended',
+        skillsInstalled: 'Installed',
+        skillsMarketTitle: 'Market (not installed)',
+        skillsMarketSearch: 'Search market',
+        skillsMarketBusy: 'searching…',
+        skillsSave: 'Save skills',
+        skillsMax: 'up to 6',
+        skillsEdit: 'Edit skills',
+        skillsMissing: 'not installed',
+        skillsEmpty: 'no matching skill',
+        skillsLoading: 'loading skill catalog…',
         taskSkillsNone: 'none recorded (this card loaded no skill)',
         taskOpenChild: 'Open child session in DSH',
         close: 'Close',
@@ -405,7 +424,26 @@ window.__ModuleLoader__.load({
         taskSectionNote: '最近备注',
         taskSectionArtifacts: '产物',
         taskSectionGates: '卡点/决定',
-        taskSectionSkills: '调用技能',
+        taskSectionSkills: '实际调用技能',
+        taskSectionRequiredSkills: '要求技能',
+        taskRequiredSkillsNone: '未指定',
+        skillsLabel: '技能',
+        skillsNone: '未选择',
+        skillsPick: '选择技能',
+        skillsTitle: '选择技能',
+        skillsHint: '默认勾选项目类型推荐技能；最多 6 个。未安装的技能标黄，规划时会向你确认安装或降级。',
+        skillsSearchPlaceholder: '搜索已安装技能…',
+        skillsRecommended: '推荐',
+        skillsInstalled: '已安装',
+        skillsMarketTitle: '市场（未安装）',
+        skillsMarketSearch: '搜索市场',
+        skillsMarketBusy: '搜索中…',
+        skillsSave: '保存技能',
+        skillsMax: '最多 6 个',
+        skillsEdit: '修改技能',
+        skillsMissing: '未安装',
+        skillsEmpty: '没有匹配的技能',
+        skillsLoading: '加载技能目录…',
         taskSkillsNone: '未记录（该卡未加载技能）',
         taskOpenChild: '在 DSH 打开子会话',
         close: '关闭',
@@ -2181,7 +2219,7 @@ window.__ModuleLoader__.load({
      * member stays one click away inside its group.
      */
     function TaskList(props) {
-      const { t, project, onBack, onOpenJob, onNewTask } = props
+      const { t, project, onBack, onOpenJob, onNewTask, onEditSkills } = props
       const jobs = Array.isArray(project.jobs) ? project.jobs : []
       const byId = new Map(jobs.map(job => [job.id, job]))
       // A change request names its parent; walk up to the root so a chain of
@@ -2225,6 +2263,10 @@ window.__ModuleLoader__.load({
         const cancelled = job.status === 'cancelled'
         const paused = job.status === 'paused'
         const artifacts = Array.isArray(job.artifacts) ? job.artifacts : []
+        const skills = Array.isArray(job.requiredSkills) ? job.requiredSkills : []
+        const canEditSkills = typeof onEditSkills === 'function'
+          && job.planBy === null && (progress.total ?? 0) === 0
+          && job.status !== 'done' && job.status !== 'cancelled'
         // Completed is a state, not a percentage: lead with the result instead
         // of repeating "14/14 完成 · 已完成".
         const accent = accentOf(job)
@@ -2279,6 +2321,19 @@ window.__ModuleLoader__.load({
                   ? h('span', {
                       style: { ...s.badge, color: 'var(--dsw-alias-brand-primary)', borderColor: 'var(--dsw-alias-brand-primary)' },
                     }, `● ${activeChanges} ${t('statusRunning')}`)
+                  : null)
+            : null,
+          skills.length > 0 || canEditSkills
+            ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' } },
+                skills.map(name => h('span', { key: `card-skill-${name}`, style: { ...s.badge } }, name)),
+                canEditSkills
+                  ? h('span', {
+                      role: 'button',
+                      tabIndex: 0,
+                      title: t('skillsEdit'),
+                      onClick: event => { event.stopPropagation(); onEditSkills(job) },
+                      style: { ...s.badge, cursor: 'pointer', color: 'var(--dsw-alias-brand-primary)' },
+                    }, `✎ ${t('skillsEdit')}`)
                   : null)
             : null,
           h('span', { style: { ...s.stageMeta, fontSize: '11px' } }, done
@@ -2867,7 +2922,7 @@ window.__ModuleLoader__.load({
      * person, then progress, then the detail you only read occasionally.
      */
     function ProjectDetail(props) {
-      const { t, project, job, summary: rawSummary, events: rawEvents, onBack, backLabel, onControl, onDecide, bridge, onJobConfig, onOpenJob } = props
+      const { t, project, job, summary: rawSummary, events: rawEvents, onBack, backLabel, onControl, onDecide, bridge, onJobConfig, onOpenJob, onEditSkills } = props
       // The cockpit belongs to one job; a legacy project without jobs renders
       // with the project itself as the scope.
       const scope = job || project
@@ -3239,6 +3294,14 @@ window.__ModuleLoader__.load({
                 style: { ...s.badge, color: STATUS_COLOR.done, borderColor: STATUS_COLOR.done, animation: 'wb-glow 1.4s ease-in-out infinite' },
               }, `● ${t('boardLive')} ${running}`)
             : null,
+          job
+            ? h('button', {
+                type: 'button', className: 'wb-btn wb-tool',
+                title: t('skillsEdit'),
+                style: { ...s.tool, padding: '0 10px' },
+                onClick: () => onEditSkills?.(),
+              }, `🎯 ${t('skillsLabel')} ${(Array.isArray(job.requiredSkills) ? job.requiredSkills : []).length}`)
+            : null,
           h('div', { className: 'wb-toolbar', style: { marginLeft: 'auto' } },
             h('button', {
               type: 'button', className: 'wb-btn wb-tool',
@@ -3579,6 +3642,13 @@ window.__ModuleLoader__.load({
             }, confirmLabel))))
     }
 
+    /** Default skill pool per project kind (mirrors profiles.js). */
+    const KIND_DEFAULT_SKILLS = {
+      software: ['create-implementation-plan', 'review-and-refactor'],
+      copy: ['documentation-writer'],
+      custom: [],
+    }
+
     /** The three project types the wizard offers; the host resolves the same ids. */
     const PROJECT_TYPES = [
       {
@@ -3769,6 +3839,132 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Pick up to six skills for a job. Installed skills are toggles; the project
+     * kind's recommended ones are preselected; market results are shown as not
+     * installed so the user may still ask for them (planning then gates).
+     */
+    function SkillPickerDialog(props) {
+      const { t, selected = [], kind = 'custom', projectId = '', busy = false, onClose, onSave } = props
+      const [picked, setPicked] = useState(selected.slice(0, 6))
+      const [catalog, setCatalog] = useState(null)
+      const [query, setQuery] = useState('')
+      const [market, setMarket] = useState([])
+      const [marketBusy, setMarketBusy] = useState(false)
+      const [error, setError] = useState(null)
+      const load = `kind=${encodeURIComponent(kind)}${projectId === '' ? '' : `&projectId=${encodeURIComponent(projectId)}`}`
+      useEffect(() => {
+        let alive = true
+        fetch(`/workbench/skills?${load}`, { credentials: 'same-origin' })
+          .then(response => response.json())
+          .then(body => { if (alive) setCatalog(body) })
+          .catch(failure => { if (alive) setError(String(failure?.message ?? failure)) })
+        return () => { alive = false }
+      }, [load])
+      const toggle = name => {
+        setPicked(current => current.includes(name)
+          ? current.filter(item => item !== name)
+          : (current.length >= 6 ? current : [...current, name]))
+      }
+      const searchMarket = () => {
+        if (query.trim() === '') return
+        setMarketBusy(true)
+        setError(null)
+        fetch(`/workbench/skills?${load}&q=${encodeURIComponent(query.trim())}`, { credentials: 'same-origin' })
+          .then(response => response.json())
+          .then(body => setMarket(Array.isArray(body?.market) ? body.market : []))
+          .catch(failure => setError(String(failure?.message ?? failure)))
+          .finally(() => setMarketBusy(false))
+      }
+      const installed = Array.isArray(catalog?.installed) ? catalog.installed : []
+      const filtered = query.trim() === ''
+        ? installed
+        : installed.filter(skill => `${skill.name} ${skill.description ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+      return h(Dialog, {
+        title: t('skillsTitle'),
+        width: '620px',
+        error,
+        busy,
+        confirmLabel: t('skillsSave'),
+        cancelLabel: t('cancel'),
+        onCancel: onClose,
+        onConfirm: () => onSave(picked),
+      },
+        h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } }, t('skillsHint')),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', minHeight: '30px', alignItems: 'center' } },
+          picked.length === 0
+            ? h('span', { style: s.stageMeta }, t('skillsNone'))
+            : picked.map(name => h('button', {
+                key: `picked-${name}`,
+                type: 'button',
+                className: 'wb-btn',
+                title: t('skillsEdit'),
+                onClick: () => toggle(name),
+                style: { ...s.badge, cursor: 'pointer' },
+              }, `${name} ×`)),
+          h('span', { style: { ...s.stageMeta, marginLeft: 'auto' } }, t('skillsMax'))),
+        catalog === null
+          ? h(Empty, { text: t('skillsLoading') })
+          : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+              Array.isArray(catalog.recommended) && catalog.recommended.length > 0
+                ? h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } },
+                    h('span', { style: s.stageMeta }, t('skillsRecommended')),
+                    catalog.recommended.map(item => h('button', {
+                      key: `recommended-${item.name}`,
+                      type: 'button',
+                      className: 'wb-btn',
+                      onClick: () => toggle(item.name),
+                      style: {
+                        ...s.badge, cursor: 'pointer',
+                        ...(picked.includes(item.name) ? { borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)' } : {}),
+                        ...(item.installed ? {} : { color: 'var(--dsw-alias-state-warning-primary)' }),
+                      },
+                    }, item.name)))
+                : null,
+              h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+                h('input', {
+                  style: { ...s.textarea, minHeight: '32px', maxHeight: '32px', flex: '1 1 auto' },
+                  value: query,
+                  placeholder: t('skillsSearchPlaceholder'),
+                  onChange: event => setQuery(event.target.value),
+                }),
+                h('button', {
+                  type: 'button', className: 'wb-btn', disabled: marketBusy,
+                  style: { ...subtleButton, height: '32px' },
+                  onClick: searchMarket,
+                }, marketBusy ? t('skillsMarketBusy') : t('skillsMarketSearch'))),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '220px', overflow: 'auto' } },
+                filtered.length === 0
+                  ? h(Empty, { text: t('skillsEmpty') })
+                  : filtered.map(skill => h('button', {
+                      key: `installed-${skill.name}`,
+                      type: 'button',
+                      className: 'wb-btn',
+                      onClick: () => toggle(skill.name),
+                      style: {
+                        ...s.badge, textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '2px',
+                        ...(picked.includes(skill.name) ? { borderColor: 'var(--dsw-alias-brand-primary)' } : {}),
+                      },
+                    },
+                      h('span', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+                        h('span', null, skill.name),
+                        h('span', { style: { ...s.stageMeta, fontSize: '10px' } }, skill.class)),
+                      skill.description
+                        ? h('span', { style: { ...s.stageMeta, fontSize: '10px' } }, skill.description.slice(0, 110))
+                        : null))),
+              market.length > 0
+                ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+                    h('span', { style: s.stageMeta }, t('skillsMarketTitle')),
+                    market.flatMap(group => (group.entries ?? []).map(entry => h('button', {
+                      key: `market-${entry.name}`,
+                      type: 'button',
+                      className: 'wb-btn',
+                      onClick: () => toggle(entry.name),
+                      style: { ...s.badge, textAlign: 'left', cursor: 'pointer', color: 'var(--dsw-alias-state-warning-primary)' },
+                    }, `${entry.name} · ${t('skillsMissing')}`))))
+                : null))
+    }
+
+    /**
      * One card's detail sheet. The rail shows enough to scan; the card itself
      * carries instructions, acceptance, dependencies, the child session and its
      * artefacts, and those are what a person needs when a card looks stuck.
@@ -3831,6 +4027,9 @@ window.__ModuleLoader__.load({
           section(t('taskSectionAcceptance'), task.acceptance ?? null),
           section(t('taskSectionNote'), task.lastNote ?? null),
           section(t('taskSectionArtifacts'), artifacts.length > 0 ? artifacts.join('\n') : null),
+          section(t('taskSectionRequiredSkills'), Array.isArray(task.requiredSkills) && task.requiredSkills.length > 0
+            ? task.requiredSkills.join('\n')
+            : t('taskRequiredSkillsNone')),
           section(t('taskSectionSkills'), Array.isArray(task.skills) && task.skills.length > 0
             ? task.skills.join('\n')
             : t('taskSkillsNone')),
@@ -3885,6 +4084,22 @@ window.__ModuleLoader__.load({
           disabled: props.busy,
           autoFocus: true,
         }),
+        typeof props.onPickSkills === 'function'
+          ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+              h('span', { style: s.stageMeta }, t('skillsLabel')),
+              (Array.isArray(props.skills) ? props.skills : []).length === 0
+                ? h('span', { style: s.stageMeta }, t('skillsNone'))
+                : (Array.isArray(props.skills) ? props.skills : []).map(name => h('span', {
+                    key: `job-skill-${name}`,
+                    style: { ...s.badge },
+                  }, name)),
+              h('button', {
+                type: 'button', className: 'wb-btn',
+                style: { ...subtleButton, height: '28px' },
+                disabled: props.busy,
+                onClick: props.onPickSkills,
+              }, t('skillsPick')))
+          : null,
         typeof props.onPickFile === 'function'
           ? h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
               h('label', {
@@ -3949,6 +4164,10 @@ window.__ModuleLoader__.load({
       // host decodes and stores it with the requirement.
       const [jobFile, setJobFile] = useState(null)
       const [jobFileError, setJobFileError] = useState(null)
+      const [jobSkills, setJobSkills] = useState([])
+      const [skillTarget, setSkillTarget] = useState(null)
+      const [skillBusy, setSkillBusy] = useState(false)
+      const [skillError, setSkillError] = useState(null)
 
       const bridge = useMemo(() => createSessionBridge(() => serviceCtx || hostCtx), [])
       const projects = payload && payload.board && Array.isArray(payload.board.projects)
@@ -4144,6 +4363,7 @@ window.__ModuleLoader__.load({
               projectId: project.id,
               ...(text === '' ? {} : { text }),
               ...(file === null ? {} : { file: { name: file.name, base64: file.base64 } }),
+              skills: jobSkills,
             }),
           })
           const body = await response.json().catch(() => null)
@@ -4152,6 +4372,7 @@ window.__ModuleLoader__.load({
           setJobBrief('')
           setJobFile(null)
           setJobFileError(null)
+          setJobSkills([])
           setTasksOpen(true)
           reload()
         } catch (error) {
@@ -4159,19 +4380,49 @@ window.__ModuleLoader__.load({
         } finally {
           setJobBusy(false)
         }
-      }, [jobBrief, jobFile, project, reload, t])
+      }, [jobBrief, jobFile, jobSkills, project, reload, t])
 
       if (payload === null) {
         return h('div', { style: s.card }, h(Empty, { text: failed ? t('decisionsOffline') : t('loading') }))
       }
 
+      const kindOfProject = () => project?.projectKind ?? project?.profile?.kind ?? 'custom'
       const openJobDialog = () => {
         setJobError(null)
         setJobFile(null)
         setJobFileError(null)
+        setJobSkills(KIND_DEFAULT_SKILLS[kindOfProject()] ?? [])
         setJobDialogOpen(true)
       }
-      const dialog = jobDialogOpen
+      const saveSkills = async skills => {
+        if (skillTarget === null) return
+        setSkillBusy(true)
+        setSkillError(null)
+        try {
+          if (skillTarget.mode === 'new') {
+            setJobSkills(skills)
+            setSkillTarget(null)
+            return
+          }
+          const response = await fetch('/workbench/job-skills', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ projectId: project.id, jobId: skillTarget.jobId, skills }),
+          })
+          const body = await response.json().catch(() => null)
+          if (!response.ok) throw new Error(body?.error?.message ?? `HTTP ${response.status}`)
+          setSkillTarget(null)
+          reload()
+        } catch (failure) {
+          setSkillError(String(failure?.message ?? failure))
+        } finally {
+          setSkillBusy(false)
+        }
+      }
+
+      const dialog = [
+        jobDialogOpen
         ? h(TaskDialog, {
             t,
             brief: jobBrief,
@@ -4184,8 +4435,25 @@ window.__ModuleLoader__.load({
             onChange: value => setJobBrief(value),
             onCancel: () => setJobDialogOpen(false),
             onConfirm: createJob,
+            skills: jobSkills,
+            onPickSkills: () => setSkillTarget({ mode: 'new' }),
           })
-        : null
+        : null,
+        skillTarget !== null
+          ? h(SkillPickerDialog, {
+              t,
+              selected: skillTarget.mode === 'new'
+                ? jobSkills
+                : ((project?.jobs ?? []).find(item => item.id === skillTarget.jobId)?.requiredSkills ?? []),
+              kind: kindOfProject(),
+              projectId: project?.id ?? '',
+              busy: skillBusy,
+              error: skillError,
+              onClose: () => { setSkillTarget(null); setSkillError(null) },
+              onSave: saveSkills,
+            })
+          : null,
+      ]
 
       if (project !== null) {
         if (job !== null) {
@@ -4203,6 +4471,7 @@ window.__ModuleLoader__.load({
               bridge,
               onJobConfig: saveJobConfig,
               onOpenJob: id => { setJobId(id); setTasksOpen(false) },
+              onEditSkills: () => setSkillTarget({ mode: 'job', jobId: job.id }),
             }),
             dialog)
         }
@@ -4227,6 +4496,7 @@ window.__ModuleLoader__.load({
               onBack: () => setTasksOpen(false),
               onOpenJob: id => { setJobId(id); setTasksOpen(false) },
               onNewTask: openJobDialog,
+              onEditSkills: jobItem => setSkillTarget({ mode: 'job', jobId: jobItem.id }),
             }),
             dialog)
         }
@@ -4332,7 +4602,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       // Test seam: the panel has no unit tests otherwise, and a stray variable
       // in a component body only surfaces as a blank slot at runtime.
-      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph, fillHeightFor },
+      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, SkillPickerDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph, fillHeightFor },
       apply(ctx) {
         hostCtx = ctx
         // Session services are optional: the panel and its sidebar entry must

@@ -201,3 +201,18 @@ test('design-stage work is dispatchable; brief/roles stay planning-only', () => 
   assert.equal(brief.ok, false)
   assert.match(brief.issues.join('; '), /dispatchable work item/)
 })
+
+test('a plan assigns required skills per card, capped and deduplicated', () => {
+  const { ok, plan } = checkPlan({
+    ...base,
+    tasks: [{
+      id: 'db', title: '建员工表', owner: 'backend', stage: 'build',
+      skills: ['office', 'office', 'create-implementation-plan', 'a', 'b', 'c', 'd'],
+    }],
+  })
+  assert.equal(ok, true)
+  assert.deepEqual(plan.tasks[0].requiredSkills, ['office', 'create-implementation-plan', 'a', 'b', 'c', 'd'])
+  const events = planEvents(plan, { now: '2026-11-05T00:00:00.000Z' })
+  const created = events.find(event => event.kind === 'task' && event.event === 'created' && event.taskId === workItemId('job-1', 'db'))
+  assert.deepEqual(created.requiredSkills, ['office', 'create-implementation-plan', 'a', 'b', 'c', 'd'])
+})

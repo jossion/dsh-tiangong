@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.7.0`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.8.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -108,6 +108,9 @@ profile on the project line and `profiles.js` resolves it:
 
 Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 
+- the **new-task dialog** carries a skill pool (recommended skills preselected, installed catalog
+  searchable, up to 6; market-only entries may be selected and are gated at planning). The pool
+  can be changed before the plan from the task card or the cockpit; afterwards it is read-only;
 - planning requires `workbench_find_skill` plus the `skill` tool before submitting a plan;
 - `workbench_find_skill` also compares the project kind's **recommended skills** (software:
   `create-implementation-plan`, `review-and-refactor`; copy: `documentation-writer`) and any
@@ -119,7 +122,10 @@ Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 - the host observes the `skill` tool-result event, maps the calling agent to its card through
   `childSessionId`, and appends a `skill` task event (deduplicated);
 - `workbench_report_work` also accepts an explicit `skills` list;
-- the card detail sheet shows **Skills used** (or says none were recorded).
+- the delivery lead assigns the execution skills to cards; each card prompt carries its
+  `requiredSkills`;
+- the card detail sheet shows **Required skills** beside **Skills used** (or says none were
+  recorded).
 
 ## Pause and resume children
 

@@ -16,6 +16,59 @@ export const SKILL_LIMITS = {
   maxIndexes: 3,
 }
 
+/**
+ * Built-in class map for skills this deployment usually ships.
+ *
+ * `planning` skills help understand/plan and are loaded by the delivery lead;
+ * `execution` skills are assigned to cards and loaded by their child agents;
+ * anything unknown stays `general` (never auto-loaded by the lead). The map is
+ * deliberately local: a third-party skill pack does not have to declare a class.
+ */
+export const SKILL_CLASSES = {
+  'create-implementation-plan': 'planning',
+  'breakdown-feature-prd': 'planning',
+  'prd': 'planning',
+  'create-plan': 'planning',
+  'information-architecture': 'planning',
+  'documentation-writer': 'execution',
+  'review-and-refactor': 'execution',
+  'security-review': 'execution',
+  'codeql': 'execution',
+  'office': 'execution',
+  'office-docx': 'execution',
+  'office-xlsx': 'execution',
+  'office-pptx': 'execution',
+  'web-design-reviewer': 'execution',
+  'taste-skill': 'execution',
+}
+
+export function skillClassOf(name) {
+  const key = String(name ?? '').trim()
+  return SKILL_CLASSES[key] ?? 'general'
+}
+
+/** Dedupe, trim and cap a user-selected skill list. */
+export function normalizeSkills(list, { max = 6 } = {}) {
+  const out = []
+  for (const item of Array.isArray(list) ? list : []) {
+    const name = String(item ?? '').trim()
+    if (name === '' || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= max) break
+  }
+  return out
+}
+
+/** Planning-class skills from a selected pool (the ones the lead may load). */
+export function planningSkillsOf(list) {
+  return normalizeSkills(list).filter(name => skillClassOf(name) === 'planning')
+}
+
+/** Execution/general skills from a pool (assigned to cards, not the lead). */
+export function executionSkillsOf(list) {
+  return normalizeSkills(list).filter(name => skillClassOf(name) !== 'planning')
+}
+
 /** Lowercase, split on punctuation/space, keeping CJK runs as terms. */
 export function tokenize(value) {
   return String(value ?? '')
@@ -113,7 +166,8 @@ export function skillAvailability(installedNames = [], recommended = [], require
   const recommendedStatus = status(recommended)
   const requiredStatus = status(required)
   const missing = [...new Set([...recommendedStatus, ...requiredStatus].filter(item => !item.installed).map(item => item.name))]
-  return { recommended: recommendedStatus, required: requiredStatus, missing }
+  const withClass = list => list.map(item => ({ ...item, class: skillClassOf(item.name) }))
+  return { recommended: withClass(recommendedStatus), required: withClass(requiredStatus), missing }
 }
 
 /** Map one market search result page to the small shape the agent needs. */

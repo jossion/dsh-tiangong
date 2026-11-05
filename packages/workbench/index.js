@@ -27,7 +27,7 @@ import { artifactEvent, buildBoard, foldTasks, jobEvent, projectEvent, requireme
 import { readyWork, reportEvents } from './executor.js'
 import { PlanError, assertPlan, buildCardId, planEvents } from './planner.js'
 import { RequirementError, assertRequirement, storeRequirement } from './requirements.js'
-import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills, skillAvailability } from './skillfind.js'
+import { SKILL_LIMITS, formatSkillResult, marketCandidates, normalizeSkills, rankSkills, skillAvailability, skillClassOf } from './skillfind.js'
 import { createSessionBridge } from './sessions.js'
 import { createDispatcher } from './dispatch.js'
 import { PROJECT_KINDS, recommendedSkillsFor, resolveProjectProfile } from './profiles.js'
@@ -157,6 +157,11 @@ export const BROWSE_PATH = '/workbench/browse-path'
  * board, or the cockpit shows "待开始" for work that is actually running.
  */
 export const TASK_PATH = '/workbench/task'
+
+/** Skill catalog for the task dialog and the job's skill editor. */
+export const SKILLS_PATH = '/workbench/skills'
+/** Change a job's required-skill pool before it is planned. */
+export const JOB_SKILLS_PATH = '/workbench/job-skills'
 
 function resolveDataDir(configured) {
   if (configured) return configured
@@ -1110,6 +1115,135 @@ export function apply(ctx, row) {
     child.on('close', code => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }))
   })
 
+  /**
+   * The installed skill catalog plus the project kind's recommendations.
+   * Read-only: selecting a skill never installs anything. `?q=` adds plugin
+   * market results for skills this deployment does not have yet.
+   */
+  const skillsRoute = {
+    kind: 'exact',
+    path: SKILLS_PATH,
+    handler: async (request, response) => {
+      if (request.method !== 'GET') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+        return
+      }
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      const kind = String(url.searchParams.get('kind') ?? '').trim()
+      const projectId = String(url.searchParams.get('projectId') ?? '').trim()
+      const query = String(url.searchParams.get('q') ?? '').trim()
+      const optional = name => {
+        try {
+          return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+        } catch {
+          return undefined
+        }
+      }
+      const skillsService = optional('skills')
+      let installed = []
+      if (skillsService && typeof skillsService.list === 'function') {
+        try {
+          installed = await skillsService.list({})
+        } catch {
+          installed = []
+        }
+      }
+      const list = (Array.isArray(installed) ? installed : []).map(skill => ({
+        name: String(skill?.name ?? ''),
+        description: String(skill?.description ?? ''),
+        whenToUse: skill?.whenToUse === undefined ? null : String(skill.whenToUse),
+        provider: skill?.provider ?? null,
+        source: skill?.source ?? null,
+        class: skillClassOf(skill?.name),
+      })).filter(skill => skill.name !== '')
+      let profile = resolveProjectProfile(kind !== '' ? kind : 'custom')
+      if (projectId !== '') {
+        const project = buildBoard(await events.all()).projects.find(item => item.id === projectId)
+        if (project !== undefined) profile = project.profile ?? resolveProjectProfile(project.projectKind ?? 'custom')
+      }
+      const recommended = recommendedSkillsFor(profile).map(name => ({
+        name,
+        installed: list.some(skill => skill.name === name),
+        class: skillClassOf(name),
+      }))
+      const market = []
+      const marketErrors = []
+      if (query !== '' && kind !== 'never') {
+        const marketService = optional('pluginMarket')
+        if (marketService && typeof marketService.search === 'function') {
+          let indexes = []
+          try {
+            indexes = typeof marketService.listIndexes === 'function' ? marketService.listIndexes() : []
+          } catch (error) {
+            marketErrors.push({ index: 'listIndexes', error: String(error?.message ?? error) })
+          }
+          for (const index of (Array.isArray(indexes) ? indexes : []).slice(0, SKILL_LIMITS.maxIndexes)) {
+            if (typeof index?.url !== 'string' || index.url === '' || typeof index.error === 'string') continue
+            try {
+              const page = await marketService.search(index.url, {
+                text: query,
+                sort: { kind: 'relevance' },
+                offset: 0,
+                limit: SKILL_LIMITS.maxMarketEntries,
+              })
+              const entries = marketCandidates(page?.entries ?? [])
+              if (entries.length > 0) market.push({ index: typeof index.title === 'string' ? index.title : index.url, entries })
+            } catch (error) {
+              marketErrors.push({ index: index.url, error: String(error?.message ?? error) })
+            }
+          }
+        }
+      }
+      sendJson(response, 200, { kind: profile.kind, installed: list, recommended, market, marketErrors })
+    },
+  }
+
+  /** Change the required-skill pool of a job that has not been planned yet. */
+  const jobSkillsRoute = {
+    kind: 'exact',
+    path: JOB_SKILLS_PATH,
+    handler: async (request, response) => {
+      if (request.method !== 'POST') {
+        sendJson(response, 405, { error: { code: 'method-not-allowed' } })
+        return
+      }
+      if (!isSameOrigin(request)) {
+        sendJson(response, 403, { error: { code: 'forbidden', message: 'cross-origin request' } })
+        return
+      }
+      let body = null
+      try {
+        body = await readJsonBody(request)
+      } catch (error) {
+        sendJson(response, 400, { error: { code: 'bad-request', message: String(error?.message ?? error) } })
+        return
+      }
+      const projectId = String(body?.projectId ?? '').trim()
+      const jobId = String(body?.jobId ?? '').trim()
+      if (projectId === '' || jobId === '') {
+        sendJson(response, 400, { error: { code: 'bad-request', message: 'projectId and jobId are required' } })
+        return
+      }
+      const skills = normalizeSkills(body?.skills)
+      const board = buildBoard(await events.all())
+      const project = board.projects.find(item => item.id === projectId)
+      const job = project?.jobs?.find(item => item.id === jobId)
+      if (job === undefined) {
+        sendJson(response, 404, { error: { code: 'unknown-job', message: `unknown job: ${jobId}` } })
+        return
+      }
+      // Assignments are a planning input: changing them after the plan would
+      // silently diverge from the cards already handed out.
+      if (job.planBy !== null || (job.progress?.total ?? 0) > 0) {
+        sendJson(response, 409, { error: { code: 'already-planned', message: 'skills can only change before the plan is submitted' } })
+        return
+      }
+      await events.append(jobEvent({ projectId, jobId, event: 'skills', skills, ts: new Date().toISOString() }))
+      loop?.schedule?.()
+      sendJson(response, 200, { projectId, jobId, skills })
+    },
+  }
+
   const browseRoute = {
     kind: 'exact',
     path: BROWSE_PATH,
@@ -1188,6 +1322,7 @@ export function apply(ctx, row) {
         }
         throw error
       }
+      requirement.skills = normalizeSkills(body?.skills)
       const board = buildBoard(await events.all())
       const project = board.projects.find(item => item.id === requirement.projectId)
       if (project === undefined) {
@@ -1232,6 +1367,7 @@ export function apply(ctx, row) {
         text: requirement.text,
         source: requirement.source,
         file: stored.relative,
+        skills: requirement.skills,
         ts: now,
       }))
       // The loop plans when a delivery session is bound; a tick here saves the
@@ -1406,6 +1542,8 @@ export function apply(ctx, row) {
         register(configRoute),
         register(pickRoute),
         register(browseRoute),
+        register(skillsRoute),
+        register(jobSkillsRoute),
         register(jobConfigRoute),
         register(taskRoute),
       ]

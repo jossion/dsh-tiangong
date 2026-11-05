@@ -5,9 +5,9 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTINUE_CHILD_TEXT, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pickScript} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTINUE_CHILD_TEXT, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, JOB_SKILLS_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, SKILLS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pickScript} from '../index.js'
 import { createEventLog } from '../events.js'
-import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
+import { buildBoard, jobEvent, planEvent, projectEvent, taskEvent } from '../projects.js'
 
 /**
  * A minimal stand-in for the Cordis context.
@@ -150,7 +150,7 @@ test('the host mounts a read route and a write route, separately', async () => {
     apply(ctx, { dataDir })
 
     assert.deepEqual(routes.map(route => route.path).sort(),
-      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, JOB_CONFIG_PATH, TASK_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH, TRANSCRIBE_PATH].sort())
+      [STATE_PATH, START_PATH, PROJECTS_PATH, CONTROL_PATH, DECIDE_PATH, CONFIG_PATH, JOB_CONFIG_PATH, TASK_PATH, PICK_PATH, BROWSE_PATH, REQUIREMENTS_PATH, TRANSCRIBE_PATH, SKILLS_PATH, JOB_SKILLS_PATH].sort())
     assert.equal(routes.every(route => !route.path.startsWith('/company')), true, 'company routes belong to @jos/company')
     assert.equal(STATE_PATH, '/workbench/state')
     assert.equal(START_PATH, '/workbench/start')
@@ -238,7 +238,7 @@ test('both routes disappear when the plugin is disposed', async () => {
   await withDataDir(async dataDir => {
     const { ctx, routes, disposers } = fakeContext()
     apply(ctx, { dataDir })
-    assert.equal(routes.length, 12)
+    assert.equal(routes.length, 14)
 
     const response = fakeResponse()
     await routes[0].handler({ method: 'GET' }, response)
@@ -1457,5 +1457,65 @@ test('workbench_find_skill reports recommended and missing skills for a project'
     assert.ok(result.availability.required.some(item => item.name === 'not-installed-skill' && item.installed === false))
     assert.ok(result.availability.missing.includes('not-installed-skill'))
     assert.ok(result.howToUse.some(line => /Missing skills/.test(line)))
+  })
+})
+
+
+test('a requirement can carry a skill pool, and it can change before the plan', async () => {
+  await withDataDir(async dataDir => {
+    const skills = { list: async () => [{ name: 'office', description: 'documents' }] }
+    const { ctx, routes } = fakeContext({ services: { skills } })
+    apply(ctx, { dataDir, autoRun: false })
+    const projectRoute = routes.find(route => route.path === PROJECTS_PATH)
+    const created = fakeResponse()
+    await projectRoute.handler(postRequest({ name: '量化', kind: 'software' }), created)
+    const projectId = JSON.parse(created.body).projectId
+
+    const requirements = routes.find(route => route.path === REQUIREMENTS_PATH)
+    const response = fakeResponse()
+    await requirements.handler(postRequest({
+      projectId,
+      text: '写一个带测试的小工具',
+      skills: ['office', 'create-implementation-plan', 'office'],
+    }), response)
+    assert.equal(response.status, 202)
+    const jobId = JSON.parse(response.body).jobId
+
+    let board = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    let job = board.projects[0].jobs.find(item => item.id === jobId)
+    assert.deepEqual(job.requiredSkills, ['office', 'create-implementation-plan'])
+    assert.deepEqual(job.requirement.skills, ['office', 'create-implementation-plan'])
+
+    const skillsRoute = routes.find(route => route.path === SKILLS_PATH)
+    const catalogResponse = fakeResponse()
+    await skillsRoute.handler({ method: 'GET', url: '/workbench/skills?kind=software' }, catalogResponse)
+    const catalog = JSON.parse(catalogResponse.body)
+    assert.ok(catalog.installed.some(item => item.name === 'office' && item.class === 'execution'))
+    assert.ok(catalog.recommended.some(item => item.name === 'create-implementation-plan' && item.installed === false))
+
+    const editRoute = routes.find(route => route.path === JOB_SKILLS_PATH)
+    const edit = fakeResponse()
+    await editRoute.handler(postRequest({ projectId, jobId, skills: ['office'] }), edit)
+    assert.equal(edit.status, 200)
+    board = buildBoard(await createEventLog(join(dataDir, 'events.jsonl')).all())
+    job = board.projects[0].jobs.find(item => item.id === jobId)
+    assert.deepEqual(job.requiredSkills, ['office'])
+
+  })
+})
+
+
+test('a planned job refuses later skill-pool edits', async () => {
+  await withDataDir(async dataDir => {
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', projectKind: 'software', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(planEvent({ projectId: 'p1', jobId: 'j1', by: 'agent', brief: 'x', tasks: 1, ts: '2026-11-05T00:00:02.000Z' }))
+    const { ctx, routes } = fakeContext()
+    apply(ctx, { dataDir, autoRun: false })
+    const editRoute = routes.find(route => route.path === JOB_SKILLS_PATH)
+    const response = fakeResponse()
+    await editRoute.handler(postRequest({ projectId: 'p1', jobId: 'j1', skills: ['office'] }), response)
+    assert.equal(response.status, 409)
   })
 })

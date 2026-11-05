@@ -110,12 +110,12 @@ test('availability separates installed recommendations from missing requirements
     ['office', 'not-installed-skill'],
   )
   assert.deepEqual(result.recommended, [
-    { name: 'create-implementation-plan', installed: true },
-    { name: 'review-and-refactor', installed: false },
+    { name: 'create-implementation-plan', installed: true, class: 'planning' },
+    { name: 'review-and-refactor', installed: false, class: 'execution' },
   ])
   assert.deepEqual(result.required, [
-    { name: 'office', installed: true },
-    { name: 'not-installed-skill', installed: false },
+    { name: 'office', installed: true, class: 'execution' },
+    { name: 'not-installed-skill', installed: false, class: 'general' },
   ])
   assert.deepEqual(result.missing, ['review-and-refactor', 'not-installed-skill'])
 })

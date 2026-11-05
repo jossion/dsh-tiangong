@@ -134,6 +134,17 @@ export function checkPlan(input, { jobId = null, projectId = null } = {}) {
     const blockedBy = Array.isArray(raw.blockedBy)
       ? [...new Set(raw.blockedBy.map(value => text(value, PLAN_LIMITS.maxId)).filter(Boolean))]
       : []
+    const requiredSkills = (() => {
+      const list = Array.isArray(raw.requiredSkills) ? raw.requiredSkills : (Array.isArray(raw.skills) ? raw.skills : [])
+      const out = []
+      for (const value of list) {
+        const name = text(value, 120)
+        if (name === '' || out.includes(name)) continue
+        out.push(name)
+        if (out.length >= 6) break
+      }
+      return out
+    })()
     if (blockedBy.length > PLAN_LIMITS.maxBlockers) issues.push(`${at}.blockedBy exceeds ${PLAN_LIMITS.maxBlockers} entries`)
     if (parentId !== null && parentId === id) issues.push(`${at}.parentId cannot point at itself`)
     if (blockedBy.includes(id)) issues.push(`${at}.blockedBy cannot contain itself`)
@@ -148,6 +159,7 @@ export function checkPlan(input, { jobId = null, projectId = null } = {}) {
       instructions: text(raw.instructions, PLAN_LIMITS.maxText) || null,
       acceptance: text(raw.acceptance, 500) || null,
       skill: text(raw.skill, 120) || null,
+      requiredSkills,
     })
   }
 
@@ -255,6 +267,7 @@ export function planEvents(plan, { now = new Date().toISOString(), by = 'agent' 
       instructions: task.instructions,
       acceptance: task.acceptance,
       skill: task.skill,
+      ...(task.requiredSkills.length > 0 ? { requiredSkills: task.requiredSkills } : {}),
       blockedBy: task.blockedBy.map(idOf),
       ts: now,
     }))

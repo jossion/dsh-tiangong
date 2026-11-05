@@ -1481,3 +1481,34 @@ test('the card sheet lists the skills the agent loaded', () => {
   walk(empty, node => { if (typeof node.props?.children === 'string') emptyParts.push(node.props.children) })
   assert.ok(emptyParts.join(' ').includes('taskSkillsNone'), 'an unloaded card says so plainly')
 })
+
+test('the new-task dialog shows the selected skill pool', () => {
+  const { TaskDialog } = module.__components
+  const page = TaskDialog({
+    t, brief: '写工具', error: null, busy: false,
+    skills: ['create-implementation-plan', 'office'],
+    onPickSkills: () => {},
+    onChange: () => {}, onCancel: () => {}, onConfirm: () => {},
+  })
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  const text = parts.join(' ')
+  assert.ok(text.includes('create-implementation-plan'))
+  assert.ok(text.includes('office'))
+  assert.ok(text.includes('skillsPick'))
+})
+
+test('the skill picker lists the current selection and the limit', () => {
+  const { SkillPickerDialog } = module.__components
+  const page = SkillPickerDialog({
+    t, selected: ['office', 'create-implementation-plan'], kind: 'software', projectId: 'p1',
+    onClose: () => {}, onSave: () => {},
+  })
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  const text = parts.join(' ')
+  assert.ok(text.includes('skillsHint'), 'the picker explains the rules')
+  assert.ok(text.includes('office ×'), 'a selected skill can be removed')
+  assert.ok(text.includes('create-implementation-plan ×'))
+  assert.ok(text.includes('skillsMax'))
+})

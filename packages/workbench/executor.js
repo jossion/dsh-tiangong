@@ -55,6 +55,10 @@ export function workItemPrompt({ project, task, siblingTitles = [], stale = fals
   if (typeof task.skill === 'string' && task.skill.trim() !== '') {
     lines.push('', `Suggested skill for this card: ${task.skill}`)
   }
+  const requiredSkills = Array.isArray(task.requiredSkills) ? task.requiredSkills : []
+  if (requiredSkills.length > 0) {
+    lines.push('', `Required skills on this card: ${requiredSkills.join(', ')} — load them with the skill tool before starting.`)
+  }
   lines.push(
     '',
     `Skills: before starting, call workbench_find_skill({ projectId: ${JSON.stringify(project?.id ?? '')}, query: <this card> })`,

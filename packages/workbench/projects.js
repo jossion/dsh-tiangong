@@ -34,6 +34,8 @@ export const TASK_EVENTS = [
   'child',
   // A skill the child loaded while working the card (observed by the host).
   'skill',
+  // The skills a card is expected to load (planner or user assignment).
+  'required',
 ]
 
 /** Where each transition leaves the task. */
@@ -66,7 +68,7 @@ export function jobEvent(input = {}) {
   const event = input.event ?? 'created'
   if (typeof projectId !== 'string' || projectId === '') throw new Error('a job event needs a projectId')
   if (typeof jobId !== 'string' || jobId === '') throw new Error('a job event needs a jobId')
-  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'deleted', 'config', 'preview-stopped'].includes(event)) {
+  if (!['created', 'started', 'done', 'failed', 'paused', 'resumed', 'cancelled', 'deleted', 'config', 'skills', 'preview-stopped'].includes(event)) {
     throw new Error(`unknown job event: ${event}`)
   }
   return { ...input, kind: 'job', event }
@@ -164,6 +166,7 @@ function blankTask(id, seed = {}) {
     claimedAt: null,
     childSessionId: null,
     skills: [],
+    requiredSkills: [],
     createdAt: seed.ts ?? null,
     updatedAt: seed.ts ?? null,
     seq: Number.isInteger(seed.seq) ? seed.seq : null,
@@ -234,6 +237,8 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          requiredSkills: [],
+          requiredSkills: [],
           tokens: null,
           costUsd: 0,
           createdAt: null,
@@ -266,6 +271,7 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          requiredSkills: [],
           tokens: null,
           costUsd: 0,
           createdAt: null,
@@ -278,8 +284,10 @@ export function foldTasks(events) {
         file: typeof event.file === 'string' && event.file !== '' ? event.file : null,
         source: typeof event.source === 'string' ? event.source : 'text',
         title: typeof event.title === 'string' ? event.title : null,
+        skills: Array.isArray(event.skills) ? event.skills.map(String).slice(0, 6) : [],
         ts: event.ts ?? null,
       }
+      if (Array.isArray(event.skills)) job.requiredSkills = event.skills.map(String).slice(0, 6)
       if (job.brief === null && typeof event.title === 'string' && event.title !== '') job.brief = event.title
       job.updatedAt = event.ts ?? job.updatedAt
       continue
@@ -303,6 +311,7 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          requiredSkills: [],
           tokens: null,
           costUsd: 0,
           createdAt: null,
@@ -338,6 +347,7 @@ export function foldTasks(events) {
           planBy: null,
           planAt: null,
           requirement: null,
+          requiredSkills: [],
           tokens: null,
           costUsd: 0,
           createdAt: null,
@@ -355,7 +365,10 @@ export function foldTasks(events) {
       if (typeof event.sessionId === 'string' && event.sessionId !== '') job.sessionId = event.sessionId
       if (event.sessionId === null) job.sessionId = null
       if (typeof event.projectId === 'string' && event.projectId !== '') job.projectId = event.projectId
-      if (event.event !== 'config') job.status = event.event === 'resumed' ? 'started' : event.event
+      if (event.event !== 'config' && event.event !== 'skills') job.status = event.event === 'resumed' ? 'started' : event.event
+      if (event.event === 'skills' && Array.isArray(event.skills)) {
+        job.requiredSkills = event.skills.map(String).slice(0, 6)
+      }
       job.createdAt ??= event.ts ?? null
       job.updatedAt = event.ts ?? job.updatedAt
       continue
@@ -443,6 +456,15 @@ export function foldTasks(events) {
       if (event.event === 'skill' && typeof event.skill === 'string' && event.skill.trim() !== '') {
         const skill = event.skill.trim()
         if (!node.skills.includes(skill)) node.skills.push(skill)
+      }
+      if (Array.isArray(event.requiredSkills)) {
+        const next = []
+        for (const item of event.requiredSkills) {
+          const name = String(item ?? '').trim()
+          if (name !== '' && !next.includes(name)) next.push(name)
+          if (next.length >= 6) break
+        }
+        node.requiredSkills = next
       }
       node.createdAt ??= event.ts ?? null
       node.updatedAt = event.ts ?? node.updatedAt
@@ -760,6 +782,7 @@ export function buildBoard(events, options = {}) {
         planBy: meta?.planBy ?? null,
         planAt: meta?.planAt ?? null,
         requirement: meta?.requirement ?? null,
+        requiredSkills: Array.isArray(meta?.requiredSkills) ? meta.requiredSkills : [],
         tokens: meta?.tokens ?? null,
         costUsd: meta?.costUsd ?? 0,
         parentJobId: meta?.parentJobId ?? null,
