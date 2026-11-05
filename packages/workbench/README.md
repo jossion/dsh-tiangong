@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.5.2`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.5.3`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -299,6 +299,10 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - Capability profiles apply when a delivery session is created (and its tool mask
   when the session is first prepared). An existing session keeps its composition;
   start a new project to change type, or edit the preset in the profile.
+- The preset's delegation rows use workbench-unique ids (`workbench-tool-spawn`,
+  `workbench-tool-subagent-control`, `workbench-tool-subagent-list-agents`): the
+  experimental agent-team bundle overrides the generic `tool-subagent*` ids, which
+  silently replaced our spawn tool with its fork tool.
 - The `workbench-child` preset is declared before the lead presets that reference
   it: a tool resolving a not-yet-declared preset fails activation, which silently
   keeps the old preset revision.
