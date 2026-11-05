@@ -1835,11 +1835,28 @@ export function apply(ctx, row) {
         const project = wantedProject !== ''
           ? (board.projects.find(item => item.id === wantedProject) ?? null)
           : (taskId !== '' ? findProjectOfTask(taskId) : (board.projects[0] ?? null))
+        const findJobOfTask = id => {
+          for (const candidate of project?.jobs ?? []) {
+            const stack = [...(candidate.roots ?? [])]
+            while (stack.length > 0) {
+              const node = stack.pop()
+              if (node.id === id) return candidate
+              stack.push(...(node.children ?? []))
+            }
+          }
+          return null
+        }
+        const job = taskId !== '' ? findJobOfTask(taskId) : ((project?.jobs ?? []).at(-1) ?? null)
         const profile = project?.profile ?? resolveProjectProfile(project?.projectKind ?? 'custom')
         const recommended = recommendedSkillsFor(profile)
-        const required = Array.isArray(input?.required)
+        const explicitRequired = Array.isArray(input?.required)
           ? input.required.map(name => String(name ?? '').trim()).filter(name => name !== '')
           : []
+        // The job pool is the default requirement set: the planner should not
+        // have to repeat it, and a missing pool skill must still be reported.
+        const required = explicitRequired.length > 0
+          ? explicitRequired
+          : (Array.isArray(job?.requiredSkills) ? job.requiredSkills : [])
         const availability = skillAvailability((Array.isArray(catalog) ? catalog : []).map(skill => skill?.name), recommended, required)
 
         const market = []
@@ -1888,7 +1905,7 @@ export function apply(ctx, row) {
             /* the lookup must not fail because its audit line could not be written */
           }
         }
-        return formatSkillResult({ query, session, market, marketErrors, availability, projectKind: profile?.kind ?? null })
+        return formatSkillResult({ query, session, market, marketErrors, availability, projectKind: profile?.kind ?? null, requiredFrom: explicitRequired.length > 0 ? 'caller' : (required.length > 0 ? 'job-pool' : null) })
       },
     }),
   )

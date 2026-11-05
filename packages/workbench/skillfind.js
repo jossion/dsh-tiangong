@@ -193,10 +193,11 @@ export function marketCandidates(entries, { limit = SKILL_LIMITS.maxMarketEntrie
  * The tool result. It separates "use it now" from "install first" so the agent
  * does not try to invoke a market plugin that is not installed yet.
  */
-export function formatSkillResult({ query, session = [], market = [], marketErrors = [], limitNote = null, availability = null, projectKind = null }) {
+export function formatSkillResult({ query, session = [], market = [], marketErrors = [], limitNote = null, availability = null, projectKind = null, requiredFrom = null }) {
   return JSON.stringify({
     query,
     ...(projectKind === null ? {} : { projectKind }),
+    ...(requiredFrom === null ? {} : { requiredFrom }),
     sessionSkills: session,
     ...(availability === null ? {} : { availability }),
     market,

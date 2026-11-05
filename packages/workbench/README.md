@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.8.2`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.8.3`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -114,6 +114,8 @@ Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 - planning requires `workbench_find_skill` plus the `skill` tool before submitting a plan; a plan
   is rejected until every execution skill in the job pool appears in at least one card's `skills`
   array (the plan schema exposes that field);
+- `workbench_find_skill` defaults its `required` set to the current **job skill pool** when the caller
+  omits it (`requiredFrom: job-pool`), so a missing pool skill is always reported.
 - `workbench_find_skill` and `/workbench/skills` read the catalog through the viewing **agent's
   scope** (the same scope the host skill tool uses), so preset/global/bundled skills are visible.
 - `workbench_find_skill` also compares the project kind's **recommended skills** (software:

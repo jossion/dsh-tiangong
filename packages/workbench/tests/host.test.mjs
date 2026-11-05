@@ -1519,3 +1519,31 @@ test('a planned job refuses later skill-pool edits', async () => {
     assert.equal(response.status, 409)
   })
 })
+
+test('find_skill defaults its required set to the job skill pool', async () => {
+  await withDataDir(async dataDir => {
+    const skills = {
+      list: async () => [
+        { name: 'office', description: 'documents' },
+        { name: 'create-implementation-plan', description: 'planning' },
+      ],
+    }
+    const { ctx, routes, tools } = fakeContext({ services: { skills } })
+    apply(ctx, { dataDir, autoRun: false })
+    const created = fakeResponse()
+    await routes.find(route => route.path === PROJECTS_PATH).handler(postRequest({ name: '量化', kind: 'software' }), created)
+    const projectId = JSON.parse(created.body).projectId
+    const requirement = fakeResponse()
+    await routes.find(route => route.path === REQUIREMENTS_PATH).handler(postRequest({
+      projectId,
+      text: '写一个带测试的小工具',
+      skills: ['office', 'create-implementation-plan'],
+    }), requirement)
+
+    const find = tools.find(tool => tool.name === 'workbench_find_skill')
+    const result = JSON.parse(await find.execute({ projectId, query: 'tiny python tool', includeMarket: false }))
+    assert.equal(result.requiredFrom, 'job-pool')
+    assert.ok(result.availability.required.some(item => item.name === 'office' && item.installed === true))
+    assert.ok(result.availability.required.some(item => item.name === 'create-implementation-plan' && item.installed === true))
+  })
+})
