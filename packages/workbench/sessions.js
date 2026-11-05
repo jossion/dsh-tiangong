@@ -405,7 +405,15 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     const parent = await resolveAgent(parentSessionId)
     if (parent === null) return { ok: false, error: 'delivery agent is not live' }
     try {
-      const messageId = await subagents.sendMessage(parent, childSessionId, [{ type: 'text', text: String(text) }], {})
+      // SubagentSendMessageOptions requires a signal; omitting it makes the
+      // host read signal.throwIfAborted on undefined.
+      const abort = new AbortController()
+      const messageId = await subagents.sendMessage(
+        parent,
+        childSessionId,
+        [{ type: 'text', text: String(text) }],
+        { signal: abort.signal },
+      )
       return { ok: true, via: 'subagents', messageId }
     } catch (error) {
       return { ok: false, error: `continue failed: ${String(error?.message ?? error)}` }

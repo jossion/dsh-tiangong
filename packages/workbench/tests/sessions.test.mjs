@@ -520,4 +520,5 @@ test('continuing a child messages it from the parent agent', async () => {
   assert.equal(calls[0].sender, agent)
   assert.equal(calls[0].targetId, 'child-1')
   assert.equal(calls[0].content[0].text, 'continue the card')
+  assert.equal(typeof calls[0].options?.signal?.throwIfAborted, 'function', 'sendMessage receives an AbortSignal')
 })

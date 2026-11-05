@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.7`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.8`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -117,9 +117,10 @@ Pause is not only a queue switch. Every card handed out with a bound child sessi
   model-side `interrupt_agent` resolves teammates in a team deployment. The
   ancestor authority names the exact live parent Agent instead.
 - **Resume** sends the child a message from that same parent Agent
-  (`subagents.sendMessage(lead, child, "continue, do not restart the card")`).
-  An idle or cold child resumes from its own persisted history, so the card is
-  not re-executed from its prompt, and resume also works after a host restart.
+  (`subagents.sendMessage(lead, child, "continue, do not restart the card")`,
+  passing the `AbortSignal` its options require). An idle or cold child resumes
+  from its own persisted history, so the card is not re-executed from its prompt,
+  and resume also works after a host restart.
 - Pause can race the spawn: the card is claimed before its child id exists. When
   `workbench_bind_child` runs while the job is paused, the plugin stops that
   child immediately and records the checkpoint, so a paused job cannot keep
