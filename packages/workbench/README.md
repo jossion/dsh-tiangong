@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.8.3`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.8.4`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -111,6 +111,9 @@ Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 - the **new-task dialog** carries a skill pool (recommended skills preselected, installed catalog
   searchable, up to 6; market-only entries may be selected and are gated at planning). The pool
   can be changed before the plan from the task card or the cockpit; afterwards it is read-only;
+- the delivery session is woken with its **project preset** (`workbench-software`/`workbench-copy`),
+  never the deployment default: a wake used to re-select the default and silently downgrade the
+  session to `standard`;
 - planning requires `workbench_find_skill` plus the `skill` tool before submitting a plan; a plan
   is rejected until every execution skill in the job pool appears in at least one card's `skills`
   array (the plan schema exposes that field);

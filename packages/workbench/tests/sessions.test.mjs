@@ -544,3 +544,33 @@ test('a child agent gets the project deny mask on its own tool scope', async () 
   assert.equal(absent.ok, false)
   assert.match(absent.error, /not live/)
 })
+
+test('waking mounts the project preset instead of the deployment default', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'workbench-sessions-'))
+  try {
+    const resolvedFor = []
+    const selected = []
+    const ctx = fakeCtx({
+      agentPresets: {
+        async resolve(wanted) {
+          resolvedFor.push(wanted)
+          return { id: wanted ?? 'standard' }
+        },
+        async select(agent, presetId) {
+          selected.push(presetId)
+          return presetId
+        },
+      },
+      sessionController: {
+        async resolveAgent() { return { agent: { id: 'session-abc' } } },
+        async prompt() { return { accepted: true } },
+      },
+    })
+    const bridge = createSessionBridge({ ctx, config: config(dir), events: noEvents, now: () => 1_000 })
+    await bridge.wake('session-abc', 'go', { project: { projectKind: 'software' } })
+    assert.deepEqual(resolvedFor, ['workbench-software'])
+    assert.deepEqual(selected, ['workbench-software'])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

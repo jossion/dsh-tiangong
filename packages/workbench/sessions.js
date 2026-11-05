@@ -212,15 +212,20 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
    * without the deployment composition lacks its prompt variables (the
    * observed failure is `{{model}}`), so we mount the resolved default once.
    */
-  async function ensureDefaultPreset(controller, sessionId) {
+  async function ensureDefaultPreset(controller, sessionId, project = null) {
     const presets = optional('agentPresets')
     if (presets === null || presets === undefined) return null
     if (typeof presets.resolve !== 'function' || typeof presets.select !== 'function') return null
     let resolved = null
     try {
-      const wanted = typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
+      // The project's own preset wins: a wake used to force the deployment
+      // default onto a session that was created with `workbench-software`,
+      // silently downgrading it to `standard`.
+      const profile = project === null || project === undefined ? null : profileOf(project)
+      const profilePreset = typeof profile?.preset === 'string' && profile.preset !== '' ? profile.preset : null
+      const wanted = profilePreset ?? (typeof config.agentPreset === 'string' && config.agentPreset.trim() !== ''
         ? config.agentPreset.trim()
-        : undefined
+        : undefined)
       resolved = await presets.resolve(wanted)
     } catch {
       return null
@@ -315,7 +320,7 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     }
     if (!presetSelected.has(sessionId)) {
       try {
-        report.preset = await ensureDefaultPreset(controller, sessionId)
+        report.preset = await ensureDefaultPreset(controller, sessionId, project)
         if (report.preset === null) report.presetError = 'preset resolve/select returned nothing'
       } catch (error) {
         report.presetError = String(error?.message ?? error)
