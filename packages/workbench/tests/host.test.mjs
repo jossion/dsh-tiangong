@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pauseChildrenText, pickScript, resumeChildrenText} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTINUE_CHILD_TEXT, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pickScript} from '../index.js'
 import { createEventLog } from '../events.js'
 import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
 
@@ -1241,9 +1241,17 @@ test('workbench_bind_child records the child session that carries a card', async
   })
 })
 
-test('pausing a job with bound children records a checkpoint', async () => {
+test('pausing a job with bound children records a checkpoint and cancels the child', async () => {
   await withDataDir(async dataDir => {
-    const { ctx, tools, routes } = fakeContext()
+    const calls = { cancel: [], prompt: [] }
+    const { ctx, tools, routes } = fakeContext({
+      services: {
+        sessionController: {
+          async cancel({ sessionId }) { calls.cancel.push(sessionId); return { accepted: true } },
+          async prompt(request) { calls.prompt.push(request); return { accepted: true } },
+        },
+      },
+    })
     apply(ctx, { dataDir })
     const log = createEventLog(join(dataDir, 'events.jsonl'))
     await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
@@ -1265,23 +1273,18 @@ test('pausing a job with bound children records a checkpoint', async () => {
     assert.ok(job.some(item => item.event === 'paused'))
     const checkpoint = lines.find(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a')
     assert.ok(checkpoint, 'pause writes a checkpoint on the in-flight card')
-    assert.match(checkpoint.notes, /paused; child session child-1/)
+    assert.match(checkpoint.notes, /paused; child session child-1 interrupted/)
+    assert.deepEqual(calls.cancel, ['child-1'], 'pause cancels the exact child session')
+
+    // Resuming prompts the same child with "continue", not a fresh card run.
+    await control.handler(postRequest({ projectId: 'p1', jobId: 'j1', action: 'resume' }), fakeResponse())
+    assert.deepEqual(calls.prompt.map(request => request.sessionId), ['child-1'])
+    assert.match(calls.prompt[0].content[0].text, /Continue the card you were working on/)
+    assert.equal(calls.prompt[0].content[0].text, CONTINUE_CHILD_TEXT)
+    const resumedLine = (await createEventLog(join(dataDir, 'events.jsonl')).all())
+      .filter(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a').at(-1)
+    assert.match(resumedLine.notes, /resumed; child session child-1 continued/)
   })
 })
 
-test('pause/resume instructions address the exact child sessions', () => {
-  const children = [
-    { id: 'j1:wi:a', title: '契约定稿', childSessionId: 'child-1' },
-    { id: 'j1:wi:b', title: '数据层', childSessionId: 'child-2' },
-  ]
-  const pause = pauseChildrenText({ job: { id: 'j1' }, children })
-  assert.match(pause, /interrupt_agent/)
-  assert.match(pause, /child-1/)
-  assert.match(pause, /child-2/)
-  assert.match(pause, /keeps its session|keeps its session, inbox/)
 
-  const resume = resumeChildrenText({ job: { id: 'j1' }, children })
-  assert.match(resume, /send_message/)
-  assert.match(resume, /child-1/)
-  assert.match(resume, /do not respawn or redo it/i)
-})

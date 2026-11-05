@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.3`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.4`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -110,12 +110,14 @@ Pause is not only a queue switch. Every card handed out with a bound child sessi
 (`workbench_bind_child`) is paused the same way:
 
 - **Pause** writes a checkpoint (`paused; child session … interrupted`) on each
-  in-flight card and wakes the delivery lead with the exact child ids. The lead
-  calls `interrupt_agent` for each one: the child's current turn stops, while its
-  session, inbox and transcript stay intact.
-- **Resume** wakes the lead with the same ids and a "continue" instruction; it
-  calls `send_message` for each child. An idle continuable child resumes from its
-  own history — the card is not re-executed from its prompt.
+  in-flight card and stops the child's current turn through the host session
+  controller (`sessionController.cancel`). Its session, inbox and transcript stay
+  intact. This does not go through a model tool: in a team deployment the delivery
+  lead's `interrupt_agent` resolves teammates, not children.
+- **Resume** prompts the same child session with `sessionController.prompt`
+  ("continue, do not restart the card"); a cold child is resumed from
+  persistence, so resume also works after a host restart. The card is not
+  re-executed from its prompt.
 - Repeated pause/resume does not re-message children (the route compares the
   state before the write), and cards whose children finished while paused are not
   addressed again.

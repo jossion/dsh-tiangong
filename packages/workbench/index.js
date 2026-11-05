@@ -338,50 +338,9 @@ export const pickScript = (kind, prompt) => {
   return null
 }
 
-/**
- * Instructions that make "pause" mean: every child stops its current turn and
- * keeps its session. The delivery lead owns the child agents (the plugin is not
- * an Agent and cannot address them), so it calls interrupt_agent for us.
- */
-export function pauseChildrenText({ job, children = [] }) {
-  const lines = [
-    `The owner paused job ${job?.id ?? 'this job'}. Stop dispatching new work.`,
-    'For each card below, call interrupt_agent with its child session id. That stops the child\'s',
-    'current turn but keeps its session, inbox and transcript; do not kill or replace it.',
-    'Do not merge, push or delete anything, and do not report these cards as done.',
-    '',
-    'Cards in flight:',
-  ]
-  for (const child of children) lines.push(`- ${child.id}${child.title ? ` "${child.title}"` : ''} child=${child.childSessionId}`)
-  lines.push(
-    '',
-    'After interrupting, reply with one short paragraph: which children stopped and which had already',
-    'finished on their own. Do not start new work.',
-  )
-  return lines.join('\n')
-}
-
-/**
- * The other half: resume means "continue the same child", not "run the card
- * again". send_message wakes an idle continuable child with its history intact.
- */
-export function resumeChildrenText({ job, children = [] }) {
-  const lines = [
-    `The owner resumed job ${job?.id ?? 'this job'}. Continue the paused work; do not respawn or redo it.`,
-    'For each card below, call send_message with agent_id = its child session id and this message:',
-    '"Continue the card you were working on. Do not restart it: keep the files and tests you already',
-    'produced, finish the remaining work, run the card tests, and report honestly."',
-    '',
-    'Paused cards:',
-  ]
-  for (const child of children) lines.push(`- ${child.id}${child.title ? ` "${child.title}"` : ''} child=${child.childSessionId}`)
-  lines.push(
-    '',
-    'If a child session cannot be resumed, report which card needs a fresh child instead of silently',
-    'redoing it. After messaging them, stop and wait for their reports.',
-  )
-  return lines.join('\n')
-}
+/** The message a paused child receives on resume; it must not restart the card. */
+export const CONTINUE_CHILD_TEXT = 'Continue the card you were working on. Do not restart it: keep the files '
+  + 'and tests you already produced, finish the remaining work, run the card tests, and report honestly.'
 
 export function apply(ctx, row) {
   const config = { ...DEFAULTS, ...(row ?? {}) }
@@ -512,29 +471,6 @@ export function apply(ctx, row) {
     }
     for (const job of jobs) visit(job.roots)
     return found
-  }
-
-  /** Wake the lead that owns these cards, grouped by its delivery session. */
-  const wakeChildren = async (project, children, action) => {
-    const groups = new Map()
-    for (const child of children) {
-      const job = project.jobs.find(item => item.id === child.jobId) ?? project.jobs[0]
-      const sessionId = job?.sessionId ?? project.sessionId
-      if (typeof sessionId !== 'string' || sessionId === '') continue
-      const list = groups.get(sessionId) ?? []
-      list.push(child)
-      groups.set(sessionId, list)
-    }
-    for (const [sessionId, list] of groups) {
-      const text = action === 'pause'
-        ? pauseChildrenText({ job: { id: list[0].jobId ?? project.id }, children: list })
-        : resumeChildrenText({ job: { id: list[0].jobId ?? project.id }, children: list })
-      try {
-        await sessionBridge.wake(sessionId, text, { deliver: 'queue', project })
-      } catch {
-        /* a failed wake is reported by the dispatcher; pause itself must not fail */
-      }
-    }
   }
 
   /** A named, empty project card: created before any work exists. */
@@ -778,25 +714,42 @@ export function apply(ctx, row) {
           // not queue a second "continue" turn on an already running child.
           const alreadyInTarget = action === 'pause' ? priorStatus === 'paused' : priorStatus === 'started'
           if (!alreadyInTarget) {
-          const board = buildBoard(await events.all())
-          const project = board.projects.find(item => item.id === projectId)
-          const children = project === undefined ? [] : activeChildren(board, projectId, jobId)
-          if (project !== undefined && children.length > 0) {
-            if (action === 'pause') {
+            const board = buildBoard(await events.all())
+            const project = board.projects.find(item => item.id === projectId)
+            const children = project === undefined ? [] : activeChildren(board, projectId, jobId)
+            if (project !== undefined && children.length > 0) {
+              // Stop/continue each child through the host session controller.
+              // Asking the delivery lead to call interrupt_agent fails in a team
+              // deployment: its tool surface resolves teammates, not children.
               const ts = new Date().toISOString()
               for (const child of children) {
-                await events.append(taskEvent({
-                  event: 'progress',
-                  taskId: child.id,
-                  projectId,
-                  jobId: child.jobId,
-                  notes: `paused; child session ${child.childSessionId} interrupted`,
-                  ts,
-                }))
+                if (action === 'pause') {
+                  const stopped = await sessionBridge.interruptChild(child.childSessionId)
+                  await events.append(taskEvent({
+                    event: 'progress',
+                    taskId: child.id,
+                    projectId,
+                    jobId: child.jobId,
+                    ts,
+                    notes: stopped.ok
+                      ? `paused; child session ${child.childSessionId} interrupted`
+                      : `paused; child session ${child.childSessionId} could not be interrupted (${stopped.error})`,
+                  }))
+                } else {
+                  const resumed = await sessionBridge.continueChild(child.childSessionId, CONTINUE_CHILD_TEXT)
+                  await events.append(taskEvent({
+                    event: 'progress',
+                    taskId: child.id,
+                    projectId,
+                    jobId: child.jobId,
+                    ts,
+                    notes: resumed.ok
+                      ? `resumed; child session ${child.childSessionId} continued`
+                      : `resumed; child session ${child.childSessionId} could not continue (${resumed.error})`,
+                  }))
+                }
               }
             }
-            await wakeChildren(project, children, action)
-          }
           }
         } catch {
           /* pause/resume of the queue already succeeded; child handling is best-effort */

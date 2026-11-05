@@ -365,6 +365,52 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
   }
 
   /**
+   * Stop one child's current turn without destroying its session.
+   *
+   * This is the host's own cancel door (the same one the panel uses), not a
+   * model tool: the delivery lead's tool surface in a team deployment can carry
+   * a same-named teammate tool, and asking the model to interrupt its own child
+   * then fails with "active teammate not found". The controller has no such
+   * ambiguity, and it keeps the transcript and pending inbox for resume.
+   */
+  async function interruptChild(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, error: 'no child session' }
+    const controller = optional('sessionController')
+    if (controller === null || controller === undefined || typeof controller.cancel !== 'function') {
+      return { ok: false, error: 'sessionController.cancel unavailable' }
+    }
+    try {
+      const receipt = await controller.cancel({ sessionId })
+      return { ok: receipt?.accepted === true, via: 'session-controller' }
+    } catch (error) {
+      return { ok: false, error: `cancel failed: ${String(error?.message ?? error)}` }
+    }
+  }
+
+  /**
+   * Continue a child that pause interrupted. `prompt` resumes a cold child
+   * session from persistence, so this also works after the host restarted.
+   */
+  async function continueChild(sessionId, text) {
+    if (typeof sessionId !== 'string' || sessionId === '') return { ok: false, error: 'no child session' }
+    const controller = optional('sessionController')
+    if (controller === null || controller === undefined || typeof controller.prompt !== 'function') {
+      return { ok: false, error: 'sessionController.prompt unavailable' }
+    }
+    try {
+      const receipt = await controller.prompt({
+        requestId: randomUUID(),
+        sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: String(text) }],
+      })
+      return { ok: receipt?.accepted === true, via: 'session-controller' }
+    } catch (error) {
+      return { ok: false, error: `continue failed: ${String(error?.message ?? error)}` }
+    }
+  }
+
+  /**
    * One dedicated session per project. Created lazily on the first requirement;
    * a project that already has one reuses it across every job.
    */
@@ -455,5 +501,8 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
     return { ok: true, sessionId, workspace: path, workspaceId, created: true, agentPreset: preset, policy }
   }
 
-  return { ensureProjectSession, ensureWorkspace, wake, prepare, measureUsage, resolveAgent, appRootFor }
+  return {
+    ensureProjectSession, ensureWorkspace, wake, prepare, measureUsage, resolveAgent, appRootFor,
+    interruptChild, continueChild,
+  }
 }

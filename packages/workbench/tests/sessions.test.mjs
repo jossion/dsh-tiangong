@@ -475,3 +475,43 @@ test('a project type chooses the preset and masks its global tools', async () =>
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('interrupting a child cancels its turn through the session controller', async () => {
+  const calls = []
+  const ctx = fakeCtx({
+    sessionController: {
+      async cancel(request) {
+        calls.push(request)
+        return { accepted: true }
+      },
+    },
+  })
+  const bridge = createSessionBridge({ ctx, config: { dataDir: '/tmp/x' }, events: noEvents })
+  const result = await bridge.interruptChild('child-1')
+  assert.deepEqual(result, { ok: true, via: 'session-controller' })
+  assert.deepEqual(calls, [{ sessionId: 'child-1' }])
+
+  const missing = await createSessionBridge({ ctx: fakeCtx({}), config: { dataDir: '/tmp/x' }, events: noEvents })
+    .interruptChild('child-1')
+  assert.equal(missing.ok, false)
+  assert.match(missing.error, /unavailable/)
+})
+
+test('continuing a child prompts the same session with the continue text', async () => {
+  const calls = []
+  const ctx = fakeCtx({
+    sessionController: {
+      async prompt(request) {
+        calls.push(request)
+        return { accepted: true }
+      },
+    },
+  })
+  const bridge = createSessionBridge({ ctx, config: { dataDir: '/tmp/x' }, events: noEvents })
+  const result = await bridge.continueChild('child-1', 'continue the card')
+  assert.equal(result.ok, true)
+  assert.equal(calls[0].sessionId, 'child-1')
+  assert.equal(calls[0].mode, 'queue')
+  assert.equal(calls[0].content[0].text, 'continue the card')
+  assert.equal(typeof calls[0].requestId, 'string')
+})
