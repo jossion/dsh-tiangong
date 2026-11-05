@@ -58,6 +58,24 @@ window.__ModuleLoader__.load({
         boardFit: 'Fit',
         boardExpand: 'expand',
         taskEntryTitle: 'New task',
+        taskOpenHint: 'Open card details',
+        taskStatusTodo: 'Queued',
+        taskStatusActive: 'Running',
+        taskStatusBlocked: 'Blocked',
+        taskStatusDone: 'Done',
+        taskStatusFailed: 'Failed',
+        taskFieldDeps: 'Depends on',
+        taskFieldChild: 'Child session',
+        taskFieldCreated: 'Created',
+        taskFieldUpdated: 'Updated',
+        taskFieldNone: 'none',
+        taskSectionInstructions: 'Instructions',
+        taskSectionAcceptance: 'Acceptance',
+        taskSectionNote: 'Last note',
+        taskSectionArtifacts: 'Artifacts',
+        taskSectionGates: 'Gates / decisions',
+        taskOpenChild: 'Open child session in DSH',
+        close: 'Close',
         taskEntryHint: 'Describe what should be built, or attach a requirement document. The app plans, dispatches and verifies it automatically.',
         taskEntryPlaceholder: 'A quotation system for our company. Four kinds of people use it: ...',
         taskSubmit: 'Start',
@@ -369,6 +387,24 @@ window.__ModuleLoader__.load({
         boardFit: '复位',
         boardExpand: '展开剩余',
         taskEntryTitle: '新建任务',
+        taskOpenHint: '点击查看卡片详情',
+        taskStatusTodo: '待执行',
+        taskStatusActive: '进行中',
+        taskStatusBlocked: '阻塞',
+        taskStatusDone: '已完成',
+        taskStatusFailed: '失败',
+        taskFieldDeps: '依赖',
+        taskFieldChild: '子会话',
+        taskFieldCreated: '创建',
+        taskFieldUpdated: '更新',
+        taskFieldNone: '无',
+        taskSectionInstructions: '任务说明',
+        taskSectionAcceptance: '验收标准',
+        taskSectionNote: '最近备注',
+        taskSectionArtifacts: '产物',
+        taskSectionGates: '卡点/决定',
+        taskOpenChild: '在 DSH 打开子会话',
+        close: '关闭',
         taskEntryHint: '写一句需求，或附一份需求文档。应用会自动规划、派发并验证。',
         taskEntryPlaceholder: '一个公司内部的报价单系统。四类人使用：销售、销售主管、财务、管理员……',
         taskSubmit: '开工',
@@ -2810,6 +2846,7 @@ window.__ModuleLoader__.load({
         writePanelStore(chatPrefKey, { x: 0, y: 0, open: next })
       }
       const [workspaceOpen, setWorkspaceOpen] = useState(false)
+      const [openTask, setOpenTask] = useState(null)
       const [layoutRef, layoutWidth] = useElementWidth()
       const railsKey = `workbench:rails:${project.id}`
       const storedRails = readPanelStore(railsKey)
@@ -2975,7 +3012,12 @@ window.__ModuleLoader__.load({
       const renderTask = (task, depth) => {
         const children = Array.isArray(task.children) ? task.children : []
         return [
-          h('div', { key: task.id, style: { ...s.treeRow, paddingLeft: `${depth * 12}px` } },
+          h('div', {
+            key: task.id,
+            title: t('taskOpenHint'),
+            onClick: () => setOpenTask(task),
+            style: { ...s.treeRow, paddingLeft: `${depth * 12}px`, cursor: 'pointer' },
+          },
             h(StatusDot, { status: task.status }),
             h('span', { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '11px' } }, task.title || task.id),
             typeof task.childSessionId === 'string' && task.childSessionId !== ''
@@ -3303,6 +3345,16 @@ window.__ModuleLoader__.load({
             })
           : null,
 
+        openTask !== null
+          ? h(TaskDetailDialog, {
+              t,
+              task: openTask,
+              onClose: () => setOpenTask(null),
+              onOpenSession: openTask.childSessionId && bridge && typeof bridge.open === 'function' && bridge.available()
+                ? () => { bridge.open(openTask.childSessionId).catch(() => {}) }
+                : null,
+            })
+          : null,
         workspaceOpen && job
           ? h(JobWorkspaceDialog, {
               t,
@@ -3466,7 +3518,9 @@ window.__ModuleLoader__.load({
           children,
           error ? h('p', { style: s.error }, error) : null,
           h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
-            h('button', { type: 'button', className: 'wb-btn', style: { ...s.badge, cursor: 'pointer', padding: '6px 14px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' }, onClick: onCancel }, cancelLabel),
+            props.cancel === false
+              ? null
+              : h('button', { type: 'button', className: 'wb-btn', style: { ...s.badge, cursor: 'pointer', padding: '6px 14px', minHeight: '32px', display: 'inline-flex', alignItems: 'center' }, onClick: onCancel }, cancelLabel),
             h('button', {
               type: 'button',
               className: 'wb-btn',
@@ -3663,6 +3717,81 @@ window.__ModuleLoader__.load({
             h('span', { style: { flex: '1 1 10px', height: '1px', background: 'var(--dsw-alias-border-l2)', minWidth: '10px' } }),
             stepChip(3, t('createStepWorkspace'))),
           content))
+    }
+
+    /**
+     * One card's detail sheet. The rail shows enough to scan; the card itself
+     * carries instructions, acceptance, dependencies, the child session and its
+     * artefacts, and those are what a person needs when a card looks stuck.
+     */
+    function TaskDetailDialog(props) {
+      const { t, task, onClose, onOpenSession } = props
+      const statusKey = {
+        todo: 'taskStatusTodo', active: 'taskStatusActive', blocked: 'taskStatusBlocked',
+        done: 'taskStatusDone', failed: 'taskStatusFailed',
+      }[task.status] ?? 'taskStatusTodo'
+      const tone = STATUS_COLOR[task.status] ?? STATUS_COLOR.todo
+      // Ledger timestamps are ISO; the sheet reads as a moment, not a wire value.
+      const stamp = value => {
+        if (typeof value !== 'string' || value === '') return null
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return value
+        return date.toLocaleString(undefined, {
+          year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+        })
+      }
+      const field = (label, value) => value === null || value === undefined || String(value).trim() === ''
+        ? null
+        : h('div', { style: { display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '10px', alignItems: 'baseline', fontSize: '12px' } },
+            h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label),
+            h('span', { style: { color: 'var(--dsw-alias-label-primary)', wordBreak: 'break-word' } }, String(value)))
+      const section = (label, body) => body === null || body === undefined || body === ''
+        ? null
+        : h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            h('span', { style: { ...s.stageMeta, fontSize: '11px' } }, label),
+            h('div', {
+              style: {
+                fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                color: 'var(--dsw-alias-label-primary)', maxHeight: '180px', overflow: 'auto',
+                background: 'var(--dsw-alias-bg-layer-1)', border: '1px solid var(--dsw-alias-border-l2)',
+                borderRadius: '8px', padding: '8px 10px',
+              },
+            }, body))
+      const artifacts = Array.isArray(task.artifacts) ? task.artifacts : []
+      const gates = Array.isArray(task.gates) ? task.gates : []
+      return h(Dialog, {
+        title: task.title || task.id,
+        width: '600px',
+        cancel: false,
+        confirmLabel: t('close'),
+        onCancel: onClose,
+        onConfirm: onClose,
+      },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '64vh', overflow: 'auto', paddingRight: '2px' } },
+          h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+            h('span', { style: { ...s.badge, color: tone, borderColor: tone, fontWeight: 600 } }, t(statusKey)),
+            task.stage ? h('span', { style: { ...s.badge } }, String(task.stage)) : null,
+            task.owner ? h('span', { style: { ...s.badge } }, `${task.owner}${task.role ? ` · ${task.role}` : ''}`) : null,
+            task.childSessionId ? h('span', { style: { ...s.badge } }, `⧉ ${String(task.childSessionId).slice(0, 18)}`) : null),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+            field(t('taskFieldDeps'), Array.isArray(task.blockedBy) && task.blockedBy.length > 0 ? task.blockedBy.join(', ') : t('taskFieldNone')),
+            field(t('taskFieldChild'), task.childSessionId || t('taskFieldNone')),
+            field(t('taskFieldCreated'), stamp(task.createdAt)),
+            field(t('taskFieldUpdated'), stamp(task.updatedAt))),
+          section(t('taskSectionInstructions'), task.instructions ?? null),
+          section(t('taskSectionAcceptance'), task.acceptance ?? null),
+          section(t('taskSectionNote'), task.lastNote ?? null),
+          section(t('taskSectionArtifacts'), artifacts.length > 0 ? artifacts.join('\n') : null),
+          section(t('taskSectionGates'), gates.length > 0
+            ? gates.map(gate => `${gate.title ?? gate.taskId ?? '—'} · ${gate.action ?? gate.decision ?? ''} · ${gate.status ?? ''}`).join('\n')
+            : null),
+          onOpenSession
+            ? h('button', {
+                type: 'button', className: 'wb-btn',
+                style: { ...subtleButton, alignSelf: 'flex-start', minHeight: '30px' },
+                onClick: onOpenSession,
+              }, t('taskOpenChild'))
+            : null))
     }
 
     /** The task entry, as a dialog instead of a permanently open textarea. */
@@ -4151,7 +4280,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       // Test seam: the panel has no unit tests otherwise, and a stray variable
       // in a component body only surfaces as a blank slot at runtime.
-      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph },
+      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph },
       apply(ctx) {
         hostCtx = ctx
         // Session services are optional: the panel and its sidebar entry must

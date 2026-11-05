@@ -1401,3 +1401,26 @@ test('a paused cockpit explains that resume continues the same children', () => 
   const text = parts.join(' ')
   assert.ok(text.includes('pausedChildrenHint'), 'the paused header says cards still belong to children')
 })
+
+test('a task detail sheet shows instructions, acceptance, dependencies and the child session', () => {
+  const { TaskDetailDialog } = module.__components
+  const task = {
+    ...project.roots[0],
+    status: 'active', stage: 'build', owner: 'backend', role: '后端开发',
+    instructions: '实现逻辑层，不要改页面',
+    acceptance: 'pytest 通过且覆盖边界',
+    childSessionId: 'child-1',
+    blockedBy: ['dep-1'],
+    artifacts: ['src/a.py'],
+    gates: [{ title: '合并 PR', action: 'merge_pull_request', status: 'requested' }],
+    createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-02T00:00:00Z',
+  }
+  const page = TaskDetailDialog({ t, task, onClose() {}, onOpenSession() {} })
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  const text = parts.join(' ')
+  for (const expected of [
+    'taskStatusActive', '实现逻辑层', 'pytest 通过且覆盖边界', 'child-1', 'dep-1', 'src/a.py',
+    '合并 PR', 'taskOpenChild',
+  ]) assert.ok(text.includes(expected), `the sheet shows ${expected}`)
+})
