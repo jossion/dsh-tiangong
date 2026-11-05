@@ -1751,7 +1751,7 @@ export function apply(ctx, row) {
           project: project.title,
           work,
           howToReport:
-            'Spawn one subagent per item with its prompt. Right after it returns "started subagent <id>", '
+            'Spawn one subagent per item with the subagent tool and its prompt. Right after it returns "started subagent <id>", '
             + 'call workbench_bind_child { taskId, childSessionId } so pause/resume can address that exact '
             + 'child. Wait for the child, then call workbench_report_work with the child report. Report tests '
             + 'honestly: an item whose tests did not pass is not done.',

@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.9`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.5.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -299,10 +299,14 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - Capability profiles apply when a delivery session is created (and its tool mask
   when the session is first prepared). An existing session keeps its composition;
   start a new project to change type, or edit the preset in the profile.
-- The tool mask covers the delivery session and, since 0.4.9, each child agent:
+- The tool mask covers the delivery session and each child agent:
   `workbench_bind_child` applies the project deny list to the child's own tool
   scope (children do not inherit their parent's restriction), and a cold resume
-  re-applies it before the continue message. The skill catalog is still shared.
+  re-applies it before the continue message. Preset-mounted tools are not
+  removable by that mask, so since 0.5.0 every card child is spawned with the
+  lean `workbench-child` preset (no delegation, no team surface, no desktop
+  automation) and the delegation group no longer offers a fork tool. The skill
+  catalog is still shared.
 - A claim is a lease (`claimLeaseMs`, default 10 min). A host restart loses the
   child that held a card; once the lease expires the card is offered again with a
   prompt that says to check the workspace before redoing the work. The dispatcher
