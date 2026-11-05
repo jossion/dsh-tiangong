@@ -20,6 +20,10 @@ const HEAVY_PREFIXES = ['blender_', 'comfyui_', 'cua_driver_native', 'computer_u
 /** Team / bot tools that belong to a person, not to a delivery lead. */
 const TEAM_TOOLS = [
   'spawn_teammate', 'list_agents', 'send_message', 'interrupt_agent', 'wait_agent',
+  // Generic delegation names are owned by the host/agent-team bundle; the
+  // workbench ships its own restricted spawn tool (workbench_spawn), so the
+  // delivery lead must not see the unrestricted ones.
+  'subagent', 'subagent_fork', 'workflow',
   'create_bot', 'update_bot', 'stop_bot', 'list_bots', 'message_bot',
   'create_group', 'update_group', 'delete_group', 'post_to_group', 'read_group_chat', 'group_relay',
   'attach_capability', 'detach_capability', 'save_capability', 'delete_capability', 'list_capabilities',
