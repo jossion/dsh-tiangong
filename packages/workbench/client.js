@@ -100,6 +100,10 @@ window.__ModuleLoader__.load({
         enterDev: 'Develop',
         pauseRun: 'Pause',
         resumeRun: 'Resume',
+        pauseHint: 'Pause dispatching. The current turn of every child agent on an in-flight card is interrupted; their sessions are kept and resume continues them.',
+        resumeHint: 'Resume dispatching. Paused children continue the card they already started; cards are not re-run from scratch.',
+        pausedChildrenHint: 'Paused: {n} card(s) still belong to child agents — resume continues those same children.',
+        childSessionHint: 'child session {id}',
         cancelRun: 'Stop',
         cancelConfirm: 'Stop dispatching new cards? Completed work stays; running agents are not killed, and you can resume dispatch from the toolbar afterwards.',
         statusPlanning: 'planning',
@@ -407,6 +411,10 @@ window.__ModuleLoader__.load({
         enterDev: '进入开发',
         pauseRun: '暂停',
         resumeRun: '继续',
+        pauseHint: '暂停派发：会中断每张在飞卡上子 agent 的当前轮，但保留它们的会话；恢复时继续这些子 agent。',
+        resumeHint: '恢复派发：让暂停的子 agent 继续执行原来的卡，不会从卡片提示重新开始。',
+        pausedChildrenHint: '已暂停：还有 {n} 张卡在子 agent 手里，恢复后会继续这些子 agent。',
+        childSessionHint: '子会话 {id}',
         cancelRun: '终止',
         cancelConfirm: '确定终止派发？已完成的卡会保留；正在运行的 agent 不会被结束，之后可以点「继续」恢复派发。',
         statusPlanning: '规划中',
@@ -2970,6 +2978,12 @@ window.__ModuleLoader__.load({
           h('div', { key: task.id, style: { ...s.treeRow, paddingLeft: `${depth * 12}px` } },
             h(StatusDot, { status: task.status }),
             h('span', { style: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '11px' } }, task.title || task.id),
+            typeof task.childSessionId === 'string' && task.childSessionId !== ''
+              ? h('span', {
+                  title: t('childSessionHint').replace('{id}', task.childSessionId),
+                  style: { ...s.stageMeta, fontSize: '10px', flex: '0 0 auto', color: 'var(--dsw-alias-label-secondary)' },
+                }, '⧉')
+              : null,
             task.blocked ? h('span', { style: { ...s.badge, color: STATUS_COLOR.blocked } }, `⛔${task.blocked}`) : null),
           ...children.flatMap(child => renderTask(child, depth + 1)),
         ]
@@ -3102,6 +3116,10 @@ window.__ModuleLoader__.load({
         : null
 
       return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative', flex: '1 1 auto', minHeight: 0 } },
+        scopeStatus === 'paused' && (totals.active ?? 0) > 0
+          ? h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
+              t('pausedChildrenHint').replace('{n}', String(totals.active)))
+          : null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
           h('button', {
             type: 'button', className: 'wb-btn wb-tool',
@@ -3171,12 +3189,14 @@ window.__ModuleLoader__.load({
             scopeStatus === 'paused' || scopeStatus === 'cancelled'
               ? h('button', {
                   type: 'button', className: 'wb-btn wb-tool',
+                  title: t('resumeHint'),
                   style: { ...s.tool, ...s.toolWarn },
                   onClick: async () => { setControlling(true); try { await onControl?.('resume') } finally { setControlling(false) } },
                   disabled: controlling,
                 }, t('resumeRun'))
               : h('button', {
                   type: 'button', className: 'wb-btn wb-tool',
+                  title: t('pauseHint'),
                   style: { ...s.tool, ...s.toolWarn },
                   onClick: async () => { setControlling(true); try { await onControl?.('pause') } finally { setControlling(false) } },
                   disabled: controlling || scopeStatus === 'cancelled',

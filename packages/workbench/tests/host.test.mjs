@@ -5,7 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pickScript} from '../index.js'
+import {BROWSE_PATH, CONFIG_PATH, CONTROL_PATH, DECIDE_PATH, JOB_CONFIG_PATH, PICK_PATH, PROJECTS_PATH, REQUIREMENTS_PATH, START_PATH, STATE_PATH, TASK_PATH, TRANSCRIBE_PATH, apply, pauseChildrenText, pickScript, resumeChildrenText} from '../index.js'
 import { createEventLog } from '../events.js'
 import { buildBoard, jobEvent, projectEvent, taskEvent } from '../projects.js'
 
@@ -212,8 +212,8 @@ test('a headless profile keeps the tools and skips the route', async () => {
     assert.equal(routes.length, 0)
     assert.deepEqual(tools.map(tool => tool.name), [
       'workbench_plan_software', 'workbench_submit_plan', 'workbench_find_skill',
-      'workbench_delivery_diagnostics', 'workbench_next_work', 'workbench_add_task',
-      'workbench_report_work',
+      'workbench_delivery_diagnostics', 'workbench_next_work', 'workbench_bind_child',
+      'workbench_add_task', 'workbench_report_work',
     ], 'the agent tools still register without a web server')
   })
 })
@@ -1209,4 +1209,79 @@ test('a bad project kind or workspace is refused', async () => {
     assert.equal(JSON.parse(legacy.body).kind, 'custom')
     assert.equal(JSON.parse(legacy.body).profile.preset, null)
   })
+})
+
+
+test('workbench_bind_child records the child session that carries a card', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+
+    const bind = tools.find(tool => tool.name === 'workbench_bind_child')
+    assert.ok(bind, 'the bind tool is registered')
+    const result = JSON.parse(await bind.execute({ taskId: 'j1:wi:a', childSessionId: 'child-1' }))
+    assert.equal(result.ok, true)
+    assert.equal(result.childSessionId, 'child-1')
+
+    const lines = (await createEventLog(join(dataDir, 'events.jsonl')).all())
+    const line = lines.find(item => item.kind === 'task' && item.event === 'child' && item.taskId === 'j1:wi:a')
+    assert.equal(line.childSessionId, 'child-1')
+    const card = buildBoard(lines).projects[0].jobs[0].roots.find(item => item.id === 'j1:wi:a')
+    assert.equal(card.childSessionId, 'child-1', 'the board exposes the binding')
+
+    const unknown = await bind.execute({ taskId: 'nope', childSessionId: 'child-2' }).then(() => null, error => error)
+    assert.match(String(unknown?.message ?? unknown), /unknown task/)
+  })
+})
+
+test('pausing a job with bound children records a checkpoint', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools, routes } = fakeContext()
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+    await log.append(taskEvent({ event: 'claimed', taskId: 'j1:wi:a', ts: '2026-11-05T00:00:03.000Z' }))
+    await tools.find(tool => tool.name === 'workbench_bind_child').execute({ taskId: 'j1:wi:a', childSessionId: 'child-1' })
+
+    const control = routes.find(route => route.path === CONTROL_PATH)
+    const response = fakeResponse()
+    await control.handler(postRequest({ projectId: 'p1', jobId: 'j1', action: 'pause' }), response)
+    assert.equal(response.status, 200)
+
+    const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
+    const job = lines.filter(item => item.kind === 'job' && item.jobId === 'j1')
+    assert.ok(job.some(item => item.event === 'paused'))
+    const checkpoint = lines.find(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a')
+    assert.ok(checkpoint, 'pause writes a checkpoint on the in-flight card')
+    assert.match(checkpoint.notes, /paused; child session child-1/)
+  })
+})
+
+test('pause/resume instructions address the exact child sessions', () => {
+  const children = [
+    { id: 'j1:wi:a', title: '契约定稿', childSessionId: 'child-1' },
+    { id: 'j1:wi:b', title: '数据层', childSessionId: 'child-2' },
+  ]
+  const pause = pauseChildrenText({ job: { id: 'j1' }, children })
+  assert.match(pause, /interrupt_agent/)
+  assert.match(pause, /child-1/)
+  assert.match(pause, /child-2/)
+  assert.match(pause, /keeps its session|keeps its session, inbox/)
+
+  const resume = resumeChildrenText({ job: { id: 'j1' }, children })
+  assert.match(resume, /send_message/)
+  assert.match(resume, /child-1/)
+  assert.match(resume, /do not respawn or redo it/i)
 })

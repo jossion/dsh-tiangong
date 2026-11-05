@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.3.6`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -104,6 +104,24 @@ profile on the project line and `profiles.js` resolves it:
   dispatchable (a design-stage contract card used to deadlock everything behind it).
 - A plan becomes a `plan` line, a build container card, and one addressable card per work item.
 
+## Pause and resume children
+
+Pause is not only a queue switch. Every card handed out with a bound child session
+(`workbench_bind_child`) is paused the same way:
+
+- **Pause** writes a checkpoint (`paused; child session … interrupted`) on each
+  in-flight card and wakes the delivery lead with the exact child ids. The lead
+  calls `interrupt_agent` for each one: the child's current turn stops, while its
+  session, inbox and transcript stay intact.
+- **Resume** wakes the lead with the same ids and a "continue" instruction; it
+  calls `send_message` for each child. An idle continuable child resumes from its
+  own history — the card is not re-executed from its prompt.
+- Repeated pause/resume does not re-message children (the route compares the
+  state before the write), and cards whose children finished while paused are not
+  addressed again.
+- Cards without a bound child (older jobs, or a lead that never bound one) keep
+  the old behavior: pause stops dispatch and nothing else.
+
 ## Dispatch, evidence, gates
 
 - `workbench_next_work({ jobId?, projectId?, limit? })` returns ready cards with complete child prompts;
@@ -155,6 +173,7 @@ profile on the project line and `profiles.js` resolves it:
 |---|---|
 | `workbench_submit_plan` | submit the validated DAG for a job (planning turn) |
 | `workbench_next_work` | list ready cards with child prompts; claims them active |
+| `workbench_bind_child` | bind a card to the continuable subagent session carrying it (pause/resume address that child) |
 | `workbench_report_work` | record a child’s files and test evidence; decides done/blocked/failed |
 | `workbench_add_task` | add a discovered card to the same dependency graph |
 | `workbench_find_skill` | search the session catalog and plugin market for a skill |

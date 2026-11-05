@@ -29,6 +29,9 @@ export const STAGE_ORDER = ['brief', 'roles', 'design', 'build', 'verify', 'repo
 /** Task life-cycle transitions a task line may carry. */
 export const TASK_EVENTS = [
   'created', 'assigned', 'claimed', 'progress', 'blocked', 'unblocked', 'done', 'failed', 'reopened',
+  // Records which continuable subagent session is carrying the card, so pause
+  // and resume can address the exact child instead of respawning it.
+  'child',
 ]
 
 /** Where each transition leaves the task. */
@@ -157,6 +160,7 @@ function blankTask(id, seed = {}) {
     lastActiveAt: null,
     startedAt: null,
     claimedAt: null,
+    childSessionId: null,
     createdAt: seed.ts ?? null,
     updatedAt: seed.ts ?? null,
     seq: Number.isInteger(seed.seq) ? seed.seq : null,
@@ -174,7 +178,7 @@ function ensureTask(tasks, id, seed) {
 }
 
 /** Descriptive fields: a later line refines them, and never blanks them. */
-const DESCRIPTIVE = ['title', 'parentId', 'projectId', 'jobId', 'stage', 'owner', 'role', 'instructions', 'acceptance', 'skill', 'discovered']
+const DESCRIPTIVE = ['title', 'parentId', 'projectId', 'jobId', 'stage', 'owner', 'role', 'instructions', 'acceptance', 'skill', 'discovered', 'childSessionId']
 
 /**
  * Log order, not clock order. Appends within one run share a millisecond, so

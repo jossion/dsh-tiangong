@@ -1381,3 +1381,23 @@ test('a running cockpit status reads as a green highlight, not a disabled chip',
   assert.ok(stopped, 'the stopped chip is rendered')
   assert.notEqual(stopped.style.color, '#7ee2a8', 'a stopped scope is not green')
 })
+
+test('a paused cockpit explains that resume continues the same children', () => {
+  const pausedProject = {
+    ...project,
+    status: 'paused',
+    totals: { ...project.totals, active: 2 },
+    roots: [{ ...project.roots[0], status: 'active', childSessionId: 'child-1' }],
+  }
+  const page = ProjectDetail({
+    t, project: pausedProject, summary: {}, events: [],
+    onBack: () => {}, onControl: () => {},
+  })
+  const parts = []
+  walk(page, node => {
+    if (typeof node.props?.children === 'string') parts.push(node.props.children)
+    if (node.props?.title === 'childSessionHint') parts.push('childSessionHint')
+  })
+  const text = parts.join(' ')
+  assert.ok(text.includes('pausedChildrenHint'), 'the paused header says cards still belong to children')
+})
