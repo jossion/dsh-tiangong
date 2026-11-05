@@ -393,3 +393,35 @@ test('one wake per cooldown, so the same ready card cannot be handed out twice',
     assert.equal(sessions.calls.wake.length, 2, 'after the cooldown a new round is allowed')
   })
 })
+
+test('a reclaimed stale card refreshes its lease, so it is not woken every tick', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await seedPlan(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    const base = Date.parse('2026-11-05T00:00:00.000Z')
+    // Claimed long ago (a lost child), so the card is stale on the first tick.
+    await log.append(taskEvent({
+      event: 'claimed', taskId: 'j1:wi:db', ts: new Date(base - 20 * 60_000).toISOString(),
+    }))
+    let clock = base
+    const sessions = fakeSessions()
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, claimLeaseMs: 10 * 60_000 },
+      events: log,
+      sessions,
+      now: () => clock,
+    })
+
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'the stale card is offered once')
+    const claims = (await log.all()).filter(line => line.kind === 'task' && line.event === 'claimed' && line.taskId === 'j1:wi:db')
+    assert.equal(claims.length, 2, 'the wake refreshes the claim')
+
+    clock += 10_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'a freshly refreshed lease is not woken again')
+  })
+})

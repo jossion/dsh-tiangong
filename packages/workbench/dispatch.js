@@ -12,7 +12,7 @@
  * written before this loop existed keeps working exactly as it did — the loop
  * must never adopt and start driving an old project by accident.
  */
-import { buildBoard } from './projects.js'
+import { buildBoard, taskEvent } from './projects.js'
 import { DEFAULT_LOOP, nextStep, snapshotOf } from './orchestrator.js'
 import { readyWork } from './executor.js'
 import { planningDirective } from './requirements.js'
@@ -266,6 +266,21 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
           now: now(), leaseMs: Number(config.claimLeaseMs) > 0 ? Number(config.claimLeaseMs) : 600_000,
         })
         if (work.length === 0) return
+        // A stale claim is re-offered by waking the lead; refresh its lease here
+        // too. The lead may act on the wake text without calling next_work, and
+        // an unrefreshed claim would look stale again on the very next tick
+        // (the same card woken every cooldown, which is what 0.3.6 removed).
+        const ts = nowIso(now)
+        for (const item of work) {
+          if (item.stale !== true) continue
+          try {
+            await events.append(taskEvent({
+              event: 'claimed', taskId: item.taskId, projectId: project.id, jobId: job.id, ts,
+            }))
+          } catch {
+            /* the wake is the point; a lease refresh must not block it */
+          }
+        }
         const text = wakeText({ job, work })
         await wakeJob(project, job, text, { mode: 'dispatch' })
         return

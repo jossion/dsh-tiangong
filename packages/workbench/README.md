@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.2`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.3`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -295,7 +295,9 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
   lead's own tools, and the mask removes global families only.
 - A claim is a lease (`claimLeaseMs`, default 10 min). A host restart loses the
   child that held a card; once the lease expires the card is offered again with a
-  prompt that says to check the workspace before redoing the work.
+  prompt that says to check the workspace before redoing the work. The dispatcher
+  refreshes the lease on that wake, so a lead that acts on the wake text without
+  calling `workbench_next_work` does not get the same card woken every cooldown.
 - `custom` follows `config.agentPreset` (or the deployment default) and masks
   nothing, which is the right default for a host without the two workbench
   presets installed.
