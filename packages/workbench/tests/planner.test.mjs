@@ -216,3 +216,16 @@ test('a plan assigns required skills per card, capped and deduplicated', () => {
   const created = events.find(event => event.kind === 'task' && event.event === 'created' && event.taskId === workItemId('job-1', 'db'))
   assert.deepEqual(created.requiredSkills, ['office', 'create-implementation-plan', 'a', 'b', 'c', 'd'])
 })
+
+test('a plan must assign the job execution skills to at least one card', () => {
+  const without = checkPlan(base, { jobSkills: ['documentation-writer'] })
+  assert.equal(without.ok, false)
+  assert.ok(without.issues.some(issue => /documentation-writer/.test(issue)))
+
+  const assigned = checkPlan({
+    ...base,
+    tasks: base.tasks.map((task, index) => index === 0 ? { ...task, skills: ['documentation-writer'] } : task),
+  }, { jobSkills: ['documentation-writer'] })
+  assert.equal(assigned.ok, true)
+  assert.deepEqual(assigned.plan.tasks[0].requiredSkills, ['documentation-writer'])
+})

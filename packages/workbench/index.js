@@ -1677,6 +1677,11 @@ export function apply(ctx, row) {
                 instructions: { type: 'string' },
                 acceptance: { type: 'string' },
                 skill: { type: 'string', description: 'Suggested skill for the executor, if known.' },
+                skills: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Execution skills this card must load (at most 6); assign the job skill pool here.',
+                },
               },
               required: ['id', 'title'],
             },
@@ -1708,7 +1713,7 @@ export function apply(ctx, row) {
         if (job.roots.length > 0 || job.planBy !== null) {
           throw new Error(`job ${jobId} already has a plan; open a new job for a change request`)
         }
-        const plan = assertPlan({ ...input, jobId, projectId: project.id })
+        const plan = assertPlan({ ...input, jobId, projectId: project.id }, { jobSkills: job.requiredSkills ?? [] })
         const now = new Date().toISOString()
         const dir = join(config.dataDir, 'deliveries', jobId)
         const files = []

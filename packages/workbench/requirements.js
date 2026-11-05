@@ -203,6 +203,8 @@ export function planningDirective({ project, job, requirement, requirementFile =
     '   acceptance leaves the later done-gate with nothing to check;',
     '   verification work uses stage "verify"; never include merge/delete-branch/rotate-credential steps.',
     `Skills: this job's selected skills are ${JSON.stringify(Array.isArray(requirement?.skills) ? requirement.skills : [])}.`,
+    '   The execution/general skills among them must be assigned to cards: the plan will be rejected',
+    '   unless every one appears in at least one task\'s "skills" array.',
     `   Call workbench_find_skill({ projectId: ${JSON.stringify(project?.id ?? '')}, query: <requirement summary>,`,
     '   required: <the selected skills plus any skill names the requirement demands explicitly> }).',
     '   Load only the PLANNING-class skills it returns (for example create-implementation-plan); do not load',

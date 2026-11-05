@@ -10,6 +10,7 @@
  * dispatcher cannot compute readiness, and "done" stops meaning anything.
  */
 import { planEvent, taskEvent } from './projects.js'
+import { executionSkillsOf } from './skillfind.js'
 
 /** Who can own a card. `workbench` plans and verifies; it does not implement. */
 export const OWNERS = ['backend', 'frontend', 'qa', 'workbench']
@@ -92,7 +93,7 @@ function cycleIn(edges) {
  * Returns `{ ok, issues, plan }` instead of throwing so a tool can report every
  * problem to the agent at once. `assertPlan()` is the throwing form.
  */
-export function checkPlan(input, { jobId = null, projectId = null } = {}) {
+export function checkPlan(input, { jobId = null, projectId = null, jobSkills = [] } = {}) {
   const issues = []
   const source = isPlainObject(input) ? input : {}
   const resolvedJobId = text(source.jobId ?? jobId, 120)
@@ -179,6 +180,17 @@ export function checkPlan(input, { jobId = null, projectId = null } = {}) {
     if (cycleIn(blockedEdges)) issues.push('blockedBy contains a cycle')
     const parentEdges = new Map(tasks.filter(task => task.parentId !== null).map(task => [task.id, [task.parentId]]))
     if (cycleIn(parentEdges)) issues.push('parentId contains a cycle')
+  }
+
+  // The job's execution skills (the user's pool) must reach at least one card;
+  // a plan that silently drops them would leave the assignment unenforced.
+  const executionSkills = executionSkillsOf(jobSkills)
+  if (executionSkills.length > 0) {
+    const assigned = new Set(tasks.flatMap(task => task.requiredSkills))
+    const missing = executionSkills.filter(name => !assigned.has(name))
+    if (missing.length > 0) {
+      issues.push(`assign the job's execution skill(s) to at least one task via tasks[].skills: ${missing.join(', ')}`)
+    }
   }
 
   const dispatchable = tasks.some(task => DISPATCH_STAGES.has(task.stage) && task.owner !== 'workbench')
