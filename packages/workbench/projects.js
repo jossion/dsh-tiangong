@@ -156,6 +156,7 @@ function blankTask(id, seed = {}) {
     lastNote: null,
     lastActiveAt: null,
     startedAt: null,
+    claimedAt: null,
     createdAt: seed.ts ?? null,
     updatedAt: seed.ts ?? null,
     seq: Number.isInteger(seed.seq) ? seed.seq : null,
@@ -426,6 +427,12 @@ export function foldTasks(events) {
         node.startedAt ??= event.ts ?? null
         node.lastActiveAt = event.ts ?? node.lastActiveAt
       }
+      // A claim is a lease: it says a child is carrying this card right now.
+      // Without the timestamp a host restart orphans the card as "active"
+      // forever (nothing can hand it out again), and without expiry a busy
+      // loop asks the agent to spawn the same card over and over.
+      if (event.event === 'claimed') node.claimedAt = event.ts ?? null
+      if (['done', 'failed', 'blocked', 'reopened'].includes(event.event)) node.claimedAt = null
       node.createdAt ??= event.ts ?? null
       node.updatedAt = event.ts ?? node.updatedAt
       if (node.seq === null && Number.isInteger(event.seq)) node.seq = event.seq

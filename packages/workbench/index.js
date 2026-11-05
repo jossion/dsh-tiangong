@@ -59,6 +59,7 @@ const CONFIG_DEFAULTS = Object.freeze({
   priceOutputPerMTok: 0,
   loopTickMs: 10000,
   stallAfterWakes: 6,
+  claimLeaseMs: 600000,
 })
 
 function validateConfigFallback(value) {
@@ -115,6 +116,7 @@ try {
       priceOutputPerMTok: z.number().min(0).description('USD per 1M output tokens; 0 keeps cost at 0.').default(0),
       loopTickMs: z.number().min(0).description('Safety-net loop interval in milliseconds.').default(10000),
       stallAfterWakes: z.number().min(0).description('Wakes without board progress before the stall gate fires.').default(6),
+      claimLeaseMs: z.number().min(0).description('How long a claimed card counts as in flight before it can be re-offered (a lost child after a restart).').default(600000),
     })
   }
 } catch {
@@ -1612,13 +1614,18 @@ export function apply(ctx, row) {
           projectId: typeof input?.projectId === 'string' && input.projectId !== '' ? input.projectId : null,
           jobId: typeof input?.jobId === 'string' && input.jobId !== '' ? input.jobId : null,
           limit,
+          now: Date.now(),
+          leaseMs: Number(config.claimLeaseMs) > 0 ? Number(config.claimLeaseMs) : 600_000,
         })
         if (project === null) throw new Error('no project yet — plan one with workbench_plan_software first')
         // Handing a card to a child is the moment it becomes active. Without
         // this line the board keeps printing "todo" while the child already
         // runs, which reads as "nothing is happening".
         for (const item of work) {
-          if (item.status === 'active' || item.status === 'done') continue
+          // Re-offering a stale claim refreshes its lease; a live claim is not
+          // claimed twice (that would look like a second child in the ledger).
+          if (item.status === 'done') continue
+          if (item.status === 'active' && item.stale !== true) continue
           try {
             await events.append(taskEvent({
               event: 'claimed',

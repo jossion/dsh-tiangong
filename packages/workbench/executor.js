@@ -44,7 +44,7 @@ function walk(tasks, visit) {
  * It names the artefact files instead of pasting them: the plan is already on
  * disk, and a prompt that repeats it goes stale the moment the design changes.
  */
-export function workItemPrompt({ project, task, siblingTitles = [] }) {
+export function workItemPrompt({ project, task, siblingTitles = [], stale = false }) {
   const dir = project?.artifactDir ?? ''
   const lines = [
     `You are the ${task.role ?? task.owner ?? 'developer'} on "${project?.title ?? project?.id ?? 'a project'}".`,
@@ -62,6 +62,14 @@ export function workItemPrompt({ project, task, siblingTitles = [] }) {
   }
   if (siblingTitles.length > 0) {
     lines.push('', `Other work in this project (do not do these): ${siblingTitles.join('; ')}`)
+  }
+  if (stale) {
+    lines.push(
+      '',
+      'NOTE: this card is still marked active from an earlier dispatch (the host restarted or the',
+      'previous child was lost). Check the workspace first: if the work already exists, run its tests',
+      'and report; otherwise complete it. Do not spawn a duplicate without checking.',
+    )
   }
   lines.push(
     '',
@@ -82,7 +90,7 @@ export function workItemPrompt({ project, task, siblingTitles = [] }) {
  * (`design` / `build` / `verify` / `report`), not done, with no open dependency.
  * Planning-only cards (`brief` / `roles`) are never handed out.
  */
-export function readyWork(board, { projectId = null, jobId = null, limit = 3 } = {}) {
+export function readyWork(board, { projectId = null, jobId = null, limit = 3, now = Date.now(), leaseMs = 600_000 } = {}) {
   const projects = Array.isArray(board?.projects) ? board.projects : []
   const project = projectId === null
     ? projects[0]
@@ -107,6 +115,18 @@ export function readyWork(board, { projectId = null, jobId = null, limit = 3 } =
     // A blocked card reported "done" with no green tests; it must not be handed
     // out again as ready work, or the loop would retry it forever.
     if (task.status === 'done' || task.status === 'failed' || task.status === 'blocked') return
+    // An active card is already being carried by a child. Handing it out again
+    // made the loop wake the same card every cooldown and ask the agent to
+    // spawn it twice. Only a claim older than the lease is re-offered: that is
+    // a lost child (host restart), not work in progress.
+    if (task.status === 'active') {
+      // claimedAt is an ISO string from the ledger; Number() on that is NaN and
+      // would silently disable the lease, so parse the clock value explicitly.
+      const claimedAt = typeof task.claimedAt === 'number'
+        ? task.claimedAt
+        : Date.parse(String(task.claimedAt ?? ''))
+      if (Number.isFinite(claimedAt) && now - claimedAt < leaseMs) return
+    }
     if (!DISPATCH_STAGES.has(task.stage)) return
     if (task.openBlockers.length > 0) return
     if (task.owner === null || task.owner === 'workbench') return
@@ -129,11 +149,15 @@ export function readyWork(board, { projectId = null, jobId = null, limit = 3 } =
     // The board's current state, so the caller can tell a fresh card from one
     // already running (a re-called next_work must not claim it twice).
     status: task.status,
+    // True only for an active card whose claim lease expired: its previous
+    // child is gone, so the prompt tells the agent to check before redoing it.
+    stale: task.status === 'active',
     // "Do not do these" is about the *other* items: a child should never be
     // told to avoid the one thing it was asked to build.
     prompt: workItemPrompt({
       project,
       task,
+      stale: task.status === 'active',
       siblingTitles: items.filter(other => other.id !== task.id).map(other => other.title),
     }),
   }))

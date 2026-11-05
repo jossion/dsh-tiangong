@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.3.5`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.3.6`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -208,6 +208,7 @@ All routes are same-origin and sit behind the host connection fence.
 | `priceInputPerMTok` / `priceOutputPerMTok` | `0` | USD per 1M tokens for cost accounting |
 | `loopTickMs` | `10000` | Safety-net loop interval |
 | `stallAfterWakes` | `6` | Wakes without board movement before the stall gate |
+| `claimLeaseMs` | `600000` | How long a claimed card counts as in flight before a lost child's claim is re-offered |
 
 Suggested deployment tuning:
 
@@ -273,6 +274,9 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - The tool mask covers the delivery session's own scope. Subagent tool surfaces
   and the skill catalog are not narrowed yet; the preset composition narrows the
   lead's own tools, and the mask removes global families only.
+- A claim is a lease (`claimLeaseMs`, default 10 min). A host restart loses the
+  child that held a card; once the lease expires the card is offered again with a
+  prompt that says to check the workspace before redoing the work.
 - `custom` follows `config.agentPreset` (or the deployment default) and masks
   nothing, which is the right default for a host without the two workbench
   presets installed.

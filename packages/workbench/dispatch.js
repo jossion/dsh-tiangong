@@ -260,7 +260,10 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
           await gate(project, job, 'stalled', 'the delivery agent kept being woken without moving a card')
           return
         }
-        const { work } = readyWork(board, { projectId: project.id, jobId: job.id, limit: 5 })
+        const { work } = readyWork(board, {
+          projectId: project.id, jobId: job.id, limit: 5,
+          now: now(), leaseMs: Number(config.claimLeaseMs) > 0 ? Number(config.claimLeaseMs) : 600_000,
+        })
         if (work.length === 0) return
         const text = wakeText({ job, work })
         await wakeJob(project, job, text, { mode: 'dispatch' })

@@ -225,3 +225,30 @@ test('a design-stage contract card is dispatchable work', () => {
     'the design card is ready and the build card behind it is not',
   )
 })
+
+test('an active card is in flight; only an expired claim is offered again', () => {
+  const base = [
+    projectEvent({ projectId: 'p1', title: '报价单系统', ts: ts(0) }),
+    taskEvent({ event: 'created', taskId: 'p1:build', projectId: 'p1', stage: 'build', owner: 'workbench', title: '实现', ts: ts(1) }),
+    taskEvent({
+      event: 'created', taskId: 'p1:wi:db', parentId: 'p1:build', projectId: 'p1',
+      stage: 'build', owner: 'backend', role: '后端开发', title: '建表', ts: ts(2),
+    }),
+    taskEvent({ event: 'claimed', taskId: 'p1:wi:db', ts: ts(3) }),
+  ]
+  const board = buildBoard(base)
+  const claimedAt = Date.parse(ts(3))
+  assert.deepEqual(
+    readyWork(board, { now: claimedAt + 60_000 }).work.map(item => item.taskId),
+    [],
+    'a live claim is not handed out again',
+  )
+  const stale = readyWork(board, { now: claimedAt + 11 * 60_000, leaseMs: 10 * 60_000 })
+  assert.equal(stale.work.length, 1, 'an expired claim is re-offered')
+  assert.equal(stale.work[0].stale, true)
+  assert.match(stale.work[0].prompt, /still marked active from an earlier dispatch/)
+
+  // Once the card is reported, the claim is gone with the status.
+  const done = buildBoard([...base, taskEvent({ event: 'done', taskId: 'p1:wi:db', ts: ts(4) })])
+  assert.deepEqual(readyWork(done, { now: claimedAt + 60_000 }).work.map(item => item.taskId), [])
+})

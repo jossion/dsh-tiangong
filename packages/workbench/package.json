@@ -1,6 +1,6 @@
 {
   "name": "@jos/workbench",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "module",
   "description": "Tiangong: a requirement-driven autonomous delivery workbench for DSH.",
   "exports": {
