@@ -1026,8 +1026,8 @@ test('the page column is a measured flex column with an 8px bottom inset', () =>
   const tree = api.__components.Panel({})
   const styles = []
   walk(tree, node => { styles.push((node.props || {}).style || {}) })
-  const page = styles.find(style => typeof style.padding === 'string' && style.padding.includes('0 8px'))
-  assert.ok(page, 'page padding ends 8px above the window bottom')
+  const page = styles.find(style => style.padding === '8px 0')
+  assert.ok(page, 'page owns the 8px gaps above and below the viewport')
   assert.ok(page.flexDirection === 'column' && page.overflow === 'hidden', 'page is a full-height column')
   assert.ok(styles.some(style => style.flex === '1 1 auto' && style.minHeight === 0), 'inner content stretches')
 })
@@ -1450,4 +1450,17 @@ test('the cockpit canvas receives the card opener', () => {
     if (typeof node.props?.onClick === 'function' && node.props?.title === 'taskOpenHint') wired = true
   })
   assert.equal(wired, true, 'clicking a canvas card is wired to the sheet')
+})
+
+test('the cockpit fills the viewport with an 8px gap above and below', () => {
+  const { fillHeightFor } = module.__components
+  // A page mounted at the very top of the route: viewport - 8 top - 8 bottom.
+  assert.equal(fillHeightFor(0, 1000, 8), 984)
+  // A page mounted below host chrome: it runs to 8px above the viewport bottom.
+  assert.equal(fillHeightFor(44, 1000, 8), 948)
+  // Scrolled above the viewport still fills instead of bailing out.
+  assert.equal(fillHeightFor(-30, 1000, 8), 984)
+  // A degenerate viewport never produces a zero-height page.
+  assert.equal(fillHeightFor(500, 300, 8), 320)
+  assert.equal(fillHeightFor(0, 0, 8), null)
 })

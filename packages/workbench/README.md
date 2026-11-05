@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.5`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.6`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -20,7 +20,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 - **Dispatch loop** — one round at a time: ready cards go to child agents with a complete prompt, results come back through `workbench_report_work`.
 - **Evidence-gated completion** — a card is done only with a real exit code, a positive pass count and zero failures; anything else lands on a person.
 - **Task groups, not card sprawl** — a delivered task and its change requests render as one root card plus its changes; the ledger still keeps one immutable job per change.
-- **Cockpit** — team graph, stage rail, HUD panels (progress / stages / tasks / gates / decisions / deliverables), live status, pause/resume/cancel, usage, workspace and conversation. Click any work card (canvas or task rail) for a detail sheet: instructions, acceptance, dependencies, the bound child session, artifacts and gates. A drag does not open the sheet.
+- **Cockpit** — team graph, stage rail, HUD panels (progress / stages / tasks / gates / decisions / deliverables), live status, pause/resume/cancel, usage, workspace and conversation. The page fills the viewport with an 8px gap above and below; the conversation column never sizes the page. Click any work card (canvas or task rail) for a detail sheet: instructions, acceptance, dependencies, the bound child session, artifacts and gates. A drag does not open the sheet.
 - **Conversation that hides the process** — the panel shows your requirement and the final answer of each turn, not planning directives, tool calls or subagent notices.
 - **Voice input** — record in the browser, transcribe on the host through DSH's shared speech-to-text service, insert the text into the draft.
 - **Automatic accounting and circuit breakers** — tokens per job, optional USD budget, stall watchdog, round trip-breaker and a hard planning timeout, each exception as a human gate.

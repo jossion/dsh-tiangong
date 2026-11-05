@@ -748,7 +748,7 @@ window.__ModuleLoader__.load({
 
     /** Shared inline styles for the workbench surfaces. */
     const s = {
-      page: { padding: '24px 0 8px', display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box', minHeight: 0, overflow: 'hidden' },
+      page: { padding: '8px 0', display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', boxSizing: 'border-box', minHeight: 0, overflow: 'hidden' },
       inner: { width: '90%', minWidth: '320px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '16px', flex: '1 1 auto', minHeight: 0 },
       title: { margin: 0, fontSize: '22px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
       muted: { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '13px', lineHeight: '1.6' },
@@ -1193,6 +1193,21 @@ window.__ModuleLoader__.load({
      * fills it down to `inset` px above the window bottom. This is what keeps
      * the conversation column's bottom edge aligned with the DSH sidebar.
      */
+    /**
+     * Height of a page that should fill the viewport minus `inset` above and
+     * below. The page's own padding supplies the top gap, so a page mounted at
+     * the top of the route gets viewport - 2*inset; a page mounted below chrome
+     * gets viewport - top - inset. Extracted so the rule is unit-testable.
+     */
+    function fillHeightFor(top, viewport, inset = 8) {
+      if (!(Number(viewport) > 0)) return null
+      const safeTop = Number.isFinite(Number(top)) ? Number(top) : 0
+      const height = safeTop <= 0
+        ? Number(viewport) - inset * 2
+        : Number(viewport) - safeTop - inset
+      return Math.max(320, Math.round(height))
+    }
+
     function useFillHeight(inset = 8) {
       const ref = useRef(null)
       const [height, setHeight] = useState(null)
@@ -1200,10 +1215,10 @@ window.__ModuleLoader__.load({
         const measure = () => {
           const node = ref.current
           if (node === null) return
-          const top = node.getBoundingClientRect().top
-          const viewport = typeof window !== 'undefined' ? window.innerHeight : 0
-          if (top <= 0 || viewport <= 0) return
-          setHeight(Math.max(320, Math.round(viewport - top - inset)))
+          const next = fillHeightFor(node.getBoundingClientRect().top, typeof window !== 'undefined' ? window.innerHeight : 0, inset)
+          // A page mounted at the very top used to bail out here forever, which
+          // left the cockpit at its content height (the conversation's height).
+          if (next !== null) setHeight(next)
         }
         measure()
         window.addEventListener('resize', measure)
@@ -3181,7 +3196,7 @@ window.__ModuleLoader__.load({
               : [])
         : null
 
-      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative', flex: '1 1 auto', minHeight: 0 } },
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px', position: 'relative', flex: '1 1 auto', height: '100%', minHeight: 0 } },
         scopeStatus === 'paused' && (totals.active ?? 0) > 0
           ? h('p', { style: { ...s.muted, margin: 0, fontSize: '12px' } },
               t('pausedChildrenHint').replace('{n}', String(totals.active)))
@@ -3347,8 +3362,8 @@ window.__ModuleLoader__.load({
           convoOpen && job && bridge
             ? h('div', {
                 style: chatSide
-                  ? { flex: '0 0 360px', minWidth: '280px', display: 'flex' }
-                  : { flex: '0 0 46%', minHeight: '200px', display: 'flex', minWidth: 0 },
+                  ? { flex: '0 0 360px', minWidth: '280px', display: 'flex', minHeight: 0, overflow: 'hidden' }
+                  : { flex: '0 0 46%', minHeight: '200px', display: 'flex', minWidth: 0, overflow: 'hidden' },
               },
                 h(JobConversation, {
                   t,
@@ -4310,7 +4325,7 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       // Test seam: the panel has no unit tests otherwise, and a stray variable
       // in a component body only surfaces as a blank slot at runtime.
-      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph },
+      __components: { Panel, WorkflowTab, ProjectHome, TaskList, ProjectDetail, ProjectCard, Dialog, TaskDialog, TaskDetailDialog, CreateCardDialog: CreateProjectWizard, CreateProjectWizard, PROJECT_TYPES, TeamGraphCard, FloatingPanel, RailPanel, JobConversation, JobWorkspaceDialog, createSessionBridge, teamGraph, fillHeightFor },
       apply(ctx) {
         hostCtx = ctx
         // Session services are optional: the panel and its sidebar entry must
