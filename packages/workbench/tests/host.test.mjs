@@ -1335,3 +1335,33 @@ test('a child bound while its job is paused is stopped immediately', async () =>
     assert.match(note.notes, /bound after pause/)
   })
 })
+
+test('binding a child applies the project mask to that child agent', async () => {
+  await withDataDir(async dataDir => {
+    const applied = []
+    const tools = {
+      schemas: () => [{ name: 'bash' }, { name: 'cua_driver_native__list_windows' }],
+      restrict: filter => applied.push(filter),
+    }
+    const child = { id: 'child-7', ctx: { get: name => (name === 'tools' ? tools : undefined) } }
+    const { ctx, tools: registered } = fakeContext({
+      services: { agents: { get: id => (id === 'child-7' ? child : undefined) } },
+    })
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', projectKind: 'software', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+
+    const bind = registered.find(tool => tool.name === 'workbench_bind_child')
+    const result = JSON.parse(await bind.execute({ taskId: 'j1:wi:a', childSessionId: 'child-7' }))
+    assert.equal(result.ok, true)
+    assert.ok(result.policy.denied.includes('cua_driver_native__list_windows'), 'the child is told which tools are masked')
+    assert.equal(applied.length, 1)
+    assert.ok(applied[0].deny.includes('cua_driver_native__list_windows'))
+    assert.ok(!applied[0].deny.includes('bash'))
+  })
+})

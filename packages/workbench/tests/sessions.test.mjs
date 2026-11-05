@@ -522,3 +522,25 @@ test('continuing a child messages it from the parent agent', async () => {
   assert.equal(calls[0].content[0].text, 'continue the card')
   assert.equal(typeof calls[0].options?.signal?.throwIfAborted, 'function', 'sendMessage receives an AbortSignal')
 })
+
+test('a child agent gets the project deny mask on its own tool scope', async () => {
+  const applied = []
+  const tools = {
+    schemas: () => [{ name: 'bash' }, { name: 'cua_driver_native__list_windows' }, { name: 'spawn_teammate' }],
+    restrict: filter => applied.push(filter),
+  }
+  const child = { id: 'child-1', ctx: { get: name => (name === 'tools' ? tools : undefined) } }
+  const ctx = fakeCtx({ agents: { get: id => (id === 'child-1' ? child : undefined) } })
+  const bridge = createSessionBridge({ ctx, config: { dataDir: '/tmp/x' }, events: noEvents })
+  const result = await bridge.applyChildToolPolicy({ projectKind: 'software' }, 'child-1')
+  assert.equal(result.ok, true)
+  assert.equal(result.applied, true)
+  assert.equal(applied.length, 1)
+  assert.ok(applied[0].deny.includes('cua_driver_native__list_windows'), 'heavy desktop tools are denied')
+  assert.ok(!applied[0].deny.includes('bash'), 'shell stays available to the child')
+
+  const absent = await createSessionBridge({ ctx: fakeCtx({ agents: { get: () => undefined } }), config: { dataDir: '/tmp/x' }, events: noEvents })
+    .applyChildToolPolicy({ projectKind: 'software' }, 'child-2')
+  assert.equal(absent.ok, false)
+  assert.match(absent.error, /not live/)
+})

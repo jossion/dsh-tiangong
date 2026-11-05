@@ -65,6 +65,53 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: true, applied: false, reason: 'profile has no tool policy' }
     }
     const agent = await resolveAgent(sessionId)
+    return restrictAgent(agent, project, sessionId)
+  }
+
+  /**
+   * Apply the same profile deny mask to a child agent, whose tool scope is its
+   * own context (a preset cannot remove globally registered heavy tools). The
+   * delivery lead's children are created by the subagent service and do NOT
+   * inherit the delivery session's restriction, so they must be masked when the
+   * card is bound — and again before a cold resume, because restriction lives on
+   * the live agent, not in the persisted session.
+   */
+  async function applyChildToolPolicy(project, childSessionId, { allowResume = false } = {}) {
+    if (typeof childSessionId !== 'string' || childSessionId === '') {
+      return { ok: false, applied: false, error: 'no child session' }
+    }
+    if (policyApplied.has(childSessionId)) return { ok: true, applied: true, cached: true }
+    const profile = profileOf(project)
+    if (profile.tools === null || profile.tools === undefined) {
+      policyApplied.add(childSessionId)
+      return { ok: true, applied: false, reason: 'profile has no tool policy' }
+    }
+    const agents = optional('agents')
+    let agent = agents !== null && agents !== undefined && typeof agents.get === 'function'
+      ? agents.get(childSessionId)
+      : undefined
+    // The binding can land a moment before the activation is published.
+    for (let attempt = 0; agent === undefined && attempt < 4; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+      agent = agents !== null && agents !== undefined && typeof agents.get === 'function' ? agents.get(childSessionId) : undefined
+    }
+    if (agent === undefined && allowResume && agents !== null && agents !== undefined && typeof agents.resume === 'function') {
+      try {
+        const handle = await agents.resume({ resumeSessionId: childSessionId })
+        agent = handle?.agent
+      } catch {
+        agent = undefined
+      }
+    }
+    if (agent === undefined || agent === null) {
+      return { ok: false, applied: false, error: 'child agent is not live' }
+    }
+    return restrictAgent(agent, project, childSessionId)
+  }
+
+  /** Shared deny-mask application for one live agent. */
+  function restrictAgent(agent, project, sessionId) {
+    const profile = profileOf(project)
     const ctx = agent !== null && agent !== undefined ? agent.ctx : undefined
     const tools = ctx !== null && ctx !== undefined && typeof ctx.get === 'function' ? ctx.get('tools') : undefined
     if (tools === null || tools === undefined || typeof tools.schemas !== 'function' || typeof tools.restrict !== 'function') {
@@ -513,6 +560,6 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
 
   return {
     ensureProjectSession, ensureWorkspace, wake, prepare, measureUsage, resolveAgent, appRootFor,
-    interruptChild, continueChild,
+    interruptChild, continueChild, applyChildToolPolicy,
   }
 }

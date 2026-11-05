@@ -737,6 +737,9 @@ export function apply(ctx, row) {
                       : `paused; child session ${child.childSessionId} could not be interrupted (${stopped.error})`,
                   }))
                 } else {
+                  // A cold resume creates a fresh agent, so re-apply the child mask
+                  // before the continue message lets it use tools again.
+                  await sessionBridge.applyChildToolPolicy(project, child.childSessionId, { allowResume: true })
                   const resumed = await sessionBridge.continueChild(parentSession, child.childSessionId, CONTINUE_CHILD_TEXT)
                   await events.append(taskEvent({
                     event: 'progress',
@@ -1814,6 +1817,9 @@ export function apply(ctx, row) {
         // stop it if its scope is paused — otherwise "paused" keeps spending.
         const scopeProject = board.projects.find(item => item.id === target.projectId)
         const scopeJob = scopeProject?.jobs?.find(item => item.id === target.jobId)
+        // Children do not inherit the delivery session's tool mask; apply the
+        // project profile's deny list to this exact child agent now.
+        const policy = await sessionBridge.applyChildToolPolicy(scopeProject, childSessionId)
         const paused = (scopeJob?.status ?? scopeProject?.status) === 'paused'
         if (paused) {
           const parentSession = scopeJob?.sessionId ?? scopeProject?.sessionId ?? null
@@ -1829,7 +1835,13 @@ export function apply(ctx, row) {
               : `paused; child session ${childSessionId} could not be interrupted (${stopped.error})`,
           }))
         }
-        return JSON.stringify({ ok: true, taskId, childSessionId, ...(paused ? { paused: true } : {}) })
+        return JSON.stringify({
+          ok: true,
+          taskId,
+          childSessionId,
+          policy: policy?.applied ? { denied: policy.denied } : { applied: false, reason: policy?.error ?? policy?.reason ?? null },
+          ...(paused ? { paused: true } : {}),
+        })
       },
     }),
   )
