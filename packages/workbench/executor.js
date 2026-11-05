@@ -52,6 +52,14 @@ export function workItemPrompt({ project, task, siblingTitles = [], stale = fals
     `Implement exactly one work item: ${task.title}`,
   ]
   if (task.instructions) lines.push('', `Instructions: ${task.instructions}`)
+  if (typeof task.skill === 'string' && task.skill.trim() !== '') {
+    lines.push('', `Suggested skill for this card: ${task.skill}`)
+  }
+  lines.push(
+    '',
+    'Skills: before starting, call workbench_find_skill for this card and load the matching skill',
+    'with the skill tool. Name the skills you loaded in your final report.',
+  )
   if (dir) {
     lines.push(
       '',

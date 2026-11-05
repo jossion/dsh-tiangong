@@ -32,6 +32,8 @@ export const TASK_EVENTS = [
   // Records which continuable subagent session is carrying the card, so pause
   // and resume can address the exact child instead of respawning it.
   'child',
+  // A skill the child loaded while working the card (observed by the host).
+  'skill',
 ]
 
 /** Where each transition leaves the task. */
@@ -161,6 +163,7 @@ function blankTask(id, seed = {}) {
     startedAt: null,
     claimedAt: null,
     childSessionId: null,
+    skills: [],
     createdAt: seed.ts ?? null,
     updatedAt: seed.ts ?? null,
     seq: Number.isInteger(seed.seq) ? seed.seq : null,
@@ -437,6 +440,10 @@ export function foldTasks(events) {
       // loop asks the agent to spawn the same card over and over.
       if (event.event === 'claimed') node.claimedAt = event.ts ?? null
       if (['done', 'failed', 'blocked', 'reopened'].includes(event.event)) node.claimedAt = null
+      if (event.event === 'skill' && typeof event.skill === 'string' && event.skill.trim() !== '') {
+        const skill = event.skill.trim()
+        if (!node.skills.includes(skill)) node.skills.push(skill)
+      }
       node.createdAt ??= event.ts ?? null
       node.updatedAt = event.ts ?? node.updatedAt
       if (node.seq === null && Number.isInteger(event.seq)) node.seq = event.seq

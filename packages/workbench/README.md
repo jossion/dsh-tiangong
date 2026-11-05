@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.5.3`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.6.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -103,6 +103,17 @@ profile on the project line and `profiles.js` resolves it:
   `brief` / `roles` are planning-only; `design` / `build` / `verify` / `report` cards are
   dispatchable (a design-stage contract card used to deadlock everything behind it).
 - A plan becomes a `plan` line, a build container card, and one addressable card per work item.
+
+## Skills on cards
+
+Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
+
+- planning requires `workbench_find_skill` plus the `skill` tool before submitting a plan;
+- every card prompt tells the child to discover and load its skill and to name it in the report;
+- the host observes the `skill` tool-result event, maps the calling agent to its card through
+  `childSessionId`, and appends a `skill` task event (deduplicated);
+- `workbench_report_work` also accepts an explicit `skills` list;
+- the card detail sheet shows **Skills used** (or says none were recorded).
 
 ## Pause and resume children
 

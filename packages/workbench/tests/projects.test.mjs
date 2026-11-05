@@ -351,3 +351,16 @@ test('a created line after a delete restores the card and its history', () => {
   assert.equal(board.projects[0].jobs.length, 1, 'its earlier job history is visible again')
   assert.equal(board.projects[0].totals.tasks, 1)
 })
+
+test('skill events accumulate on a card without duplicates', () => {
+  const base = [
+    projectEvent({ projectId: 'p1', title: '量化', ts: ts(0) }),
+    taskEvent({ event: 'created', taskId: 't1', projectId: 'p1', stage: 'build', owner: 'backend', title: '契约', ts: ts(1) }),
+    taskEvent({ event: 'skill', taskId: 't1', projectId: 'p1', skill: 'office', ts: ts(2) }),
+    taskEvent({ event: 'skill', taskId: 't1', projectId: 'p1', skill: 'office', ts: ts(3) }),
+    taskEvent({ event: 'skill', taskId: 't1', projectId: 'p1', skill: 'taste-skill', ts: ts(4) }),
+  ]
+  const board = buildBoard(base)
+  const card = board.projects[0].roots[0]
+  assert.deepEqual(card.skills, ['office', 'taste-skill'])
+})

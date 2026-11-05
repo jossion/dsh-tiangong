@@ -51,7 +51,7 @@ function fakeLlm() {
   }
 }
 
-function fakeContext({ withWebServer = true, withLlm = true, connection = null, services = {} } = {}) {
+function fakeContext({ withWebServer = true, withLlm = true, connection = null, services = {}, withEvents = false } = {}) {
   const routes = []
   const tools = []
   const disposers = []
@@ -77,7 +77,21 @@ function fakeContext({ withWebServer = true, withLlm = true, connection = null, 
     },
   }
 
+  const listeners = new Map()
   const ctx = {
+    ...(withEvents
+      ? {
+          on(name, listener) {
+            const set = listeners.get(name) ?? new Set()
+            set.add(listener)
+            listeners.set(name, set)
+            return () => set.delete(listener)
+          },
+          emit(name, ...args) {
+            for (const listener of listeners.get(name) ?? []) listener(...args)
+          },
+        }
+      : {}),
     // A one-shot read during apply must find nothing, like the real thing.
     get(name) {
       if (Object.prototype.hasOwnProperty.call(services, name)) return services[name]
@@ -103,7 +117,9 @@ function fakeContext({ withWebServer = true, withLlm = true, connection = null, 
     logger: { warn() {} },
   }
 
-  return { ctx, routes, tools, disposers }
+  return withEvents
+    ? { ctx, routes, tools, disposers, emit: (name, ...args) => ctx.emit(name, ...args) }
+    : { ctx, routes, tools, disposers }
 }
 
 function fakeResponse() {
@@ -1363,5 +1379,54 @@ test('binding a child applies the project mask to that child agent', async () =>
     assert.equal(applied.length, 1)
     assert.ok(applied[0].deny.includes('cua_driver_native__list_windows'))
     assert.ok(!applied[0].deny.includes('bash'))
+  })
+})
+
+
+test('a skill loaded by a card child is recorded on that card', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools, emit } = fakeContext({ withEvents: true })
+    apply(ctx, { dataDir, autoRun: false })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+    const bind = tools.find(tool => tool.name === 'workbench_bind_child')
+    await bind.execute({ taskId: 'j1:wi:a', childSessionId: 'child-1' })
+
+    emit('tools/result', { name: 'skill', arguments: { name: 'office' }, agent: { id: 'child-1' } })
+    emit('tools/result', { name: 'skill', arguments: { name: 'office' }, agent: { id: 'child-1' } })
+    await new Promise(resolve => setTimeout(resolve, 120))
+
+    const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
+    const skills = lines.filter(line => line.kind === 'task' && line.event === 'skill')
+    assert.equal(skills.length, 1, 'the same skill is recorded once')
+    assert.equal(skills[0].skill, 'office')
+    assert.equal(skills[0].taskId, 'j1:wi:a')
+    const card = buildBoard(lines).projects[0].jobs[0].roots.find(item => item.id === 'j1:wi:a')
+    assert.deepEqual(card.skills, ['office'])
+  })
+})
+
+test('a report can name the skills the child loaded', async () => {
+  await withDataDir(async dataDir => {
+    const { ctx, tools } = fakeContext()
+    apply(ctx, { dataDir, autoRun: false })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+    const report = tools.find(tool => tool.name === 'workbench_report_work')
+    await report.execute({ taskId: 'j1:wi:a', event: 'progress', notes: 'halfway', skills: ['office'] })
+    const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
+    const skill = lines.find(item => item.kind === 'task' && item.event === 'skill' && item.skill === 'office')
+    assert.ok(skill, 'the reported skill lands in the ledger')
+    assert.equal(skill.taskId, 'j1:wi:a')
   })
 })

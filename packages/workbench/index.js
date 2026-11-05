@@ -353,6 +353,78 @@ export function apply(ctx, row) {
   // The delivery loop's two halves: the host bridge (sessions/agents) and the
   // dispatcher that wakes the bound agent when work is ready.
   const sessionBridge = createSessionBridge({ ctx, config, events })
+
+  /**
+   * Observe the host `skill` tool while a card child works that card.
+   *
+   * Children load skills through the host's tool, so the plugin never sees a
+   * "skills" field in a report; the tool-result event carries the exact agent
+   * id, which maps back to the card through childSessionId. Recording it here
+   * keeps the card detail honest without trusting a model-written list.
+   */
+  const observedSkills = new Set()
+  const skillNameOfExec = exec => {
+    const raw = exec?.arguments
+    let parsed = raw
+    if (typeof raw === 'string') {
+      try { parsed = JSON.parse(raw) } catch { parsed = null }
+    }
+    const name = parsed?.name ?? parsed?.skill ?? parsed?.id
+    return typeof name === 'string' && name.trim() !== '' ? name.trim() : null
+  }
+  const recordSkillUse = async exec => {
+    try {
+      if (exec?.name !== 'skill') return
+      const agentId = exec.agent?.id
+      const skill = skillNameOfExec(exec)
+      if (typeof agentId !== 'string' || agentId === '' || skill === null) return
+      const board = buildBoard(await events.all())
+      const findCard = nodes => {
+        for (const node of Array.isArray(nodes) ? nodes : []) {
+          if (node.childSessionId === agentId) return node
+          const hit = findCard(node.children)
+          if (hit !== null) return hit
+        }
+        return null
+      }
+      for (const project of board.projects) {
+        let card = findCard(project.roots)
+        let job = null
+        for (const candidate of project.jobs ?? []) {
+          if (card !== null) break
+          card = findCard(candidate.roots)
+          job = candidate
+        }
+        if (card === null) continue
+        const key = `${card.id}:${skill}`
+        if (observedSkills.has(key)) return
+        observedSkills.add(key)
+        await events.append(taskEvent({
+          event: 'skill',
+          taskId: card.id,
+          projectId: project.id,
+          jobId: job?.id ?? card.jobId ?? null,
+          skill,
+          ts: new Date().toISOString(),
+        }))
+        return
+      }
+    } catch {
+      /* observing a skill must never break the tool call it observed */
+    }
+  }
+  ctx.effect(() => {
+    if (typeof ctx.on !== 'function') return () => {}
+    let dispose = null
+    try {
+      dispose = ctx.on('tools/result', exec => { void recordSkillUse(exec) })
+    } catch {
+      dispose = null
+    }
+    return () => {
+      try { dispose?.() } catch { /* already withdrawn */ }
+    }
+  })
   let loop = null
 
   // A decision sink that never lets an audit failure abort a run: losing one
@@ -1943,6 +2015,11 @@ export function apply(ctx, row) {
           testsFailed: { type: 'integer', description: 'Number of failing tests.' },
           linesChanged: { type: 'integer', description: 'Approximate changed line count, for diff risk.' },
           notes: { type: 'string', description: 'One or two sentences from the child.' },
+          skills: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Skills the child loaded while working this card (observed skills are also recorded automatically).',
+          },
         },
         required: ['taskId', 'event'],
       },
@@ -1959,6 +2036,14 @@ export function apply(ctx, row) {
         if (task === undefined) throw new Error(`unknown task: ${taskId}`)
         const project = buildBoard(before).projects.find(item => item.id === task.projectId)
           ?? { id: task.projectId, artifactDir: null }
+        for (const skill of Array.isArray(input?.skills) ? input.skills : []) {
+          const name = String(skill ?? '').trim()
+          if (name === '') continue
+          await events.append(taskEvent({
+            event: 'skill', taskId, projectId: task.projectId, jobId: task.jobId ?? null,
+            skill: name, ts: new Date().toISOString(),
+          }))
+        }
 
         const lines = reportEvents({
           task,

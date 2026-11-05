@@ -74,6 +74,8 @@ window.__ModuleLoader__.load({
         taskSectionNote: 'Last note',
         taskSectionArtifacts: 'Artifacts',
         taskSectionGates: 'Gates / decisions',
+        taskSectionSkills: 'Skills used',
+        taskSkillsNone: 'none recorded (this card loaded no skill)',
         taskOpenChild: 'Open child session in DSH',
         close: 'Close',
         taskEntryHint: 'Describe what should be built, or attach a requirement document. The app plans, dispatches and verifies it automatically.',
@@ -403,6 +405,8 @@ window.__ModuleLoader__.load({
         taskSectionNote: '最近备注',
         taskSectionArtifacts: '产物',
         taskSectionGates: '卡点/决定',
+        taskSectionSkills: '调用技能',
+        taskSkillsNone: '未记录（该卡未加载技能）',
         taskOpenChild: '在 DSH 打开子会话',
         close: '关闭',
         taskEntryHint: '写一句需求，或附一份需求文档。应用会自动规划、派发并验证。',
@@ -3827,6 +3831,9 @@ window.__ModuleLoader__.load({
           section(t('taskSectionAcceptance'), task.acceptance ?? null),
           section(t('taskSectionNote'), task.lastNote ?? null),
           section(t('taskSectionArtifacts'), artifacts.length > 0 ? artifacts.join('\n') : null),
+          section(t('taskSectionSkills'), Array.isArray(task.skills) && task.skills.length > 0
+            ? task.skills.join('\n')
+            : t('taskSkillsNone')),
           section(t('taskSectionGates'), gates.length > 0
             ? gates.map(gate => `${gate.title ?? gate.taskId ?? '—'} · ${gate.action ?? gate.decision ?? ''} · ${gate.status ?? ''}`).join('\n')
             : null),

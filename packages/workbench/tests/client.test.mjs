@@ -1464,3 +1464,20 @@ test('the cockpit fills the viewport with an 8px gap above and below', () => {
   assert.equal(fillHeightFor(500, 300, 8), 320)
   assert.equal(fillHeightFor(0, 0, 8), null)
 })
+
+test('the card sheet lists the skills the agent loaded', () => {
+  const { TaskDetailDialog } = module.__components
+  const task = { ...project.roots[0], status: 'done', skills: ['office', 'taste-skill'] }
+  const page = TaskDetailDialog({ t, task, onClose() {}, onOpenSession() {} })
+  const parts = []
+  walk(page, node => { if (typeof node.props?.children === 'string') parts.push(node.props.children) })
+  const text = parts.join(' ')
+  assert.ok(text.includes('taskSectionSkills'))
+  assert.ok(text.includes('office'))
+  assert.ok(text.includes('taste-skill'))
+
+  const empty = TaskDetailDialog({ t, task: { ...project.roots[0], status: 'done' }, onClose() {}, onOpenSession() {} })
+  const emptyParts = []
+  walk(empty, node => { if (typeof node.props?.children === 'string') emptyParts.push(node.props.children) })
+  assert.ok(emptyParts.join(' ').includes('taskSkillsNone'), 'an unloaded card says so plainly')
+})
