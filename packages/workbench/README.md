@@ -9,13 +9,14 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.8.4`).
+> Capability inventory below is current as of **2026-11-05** (workbench `0.8.4`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
 
 - **Project types** — the create-project wizard offers **software delivery**, **copy writing** and **custom**; a type binds a lead-agent preset, a global-tool mask and a workspace template.
 - **Requirement intake** — paste text or attach `.md` / `.markdown` / `.txt` (≤512 KiB; text ≤20 000 chars) right in the panel. A change request can name the delivered job it follows.
+- **Skills per task** — the new-task dialog recommends the project type's skills, lets you search the installed catalog, mark market-only entries, and keeps up to 6. The pool is editable before planning from the task card or the cockpit, the planner must assign execution skills to cards, and the card sheet compares *required* with *actually used* skills.
 - **Planning as a contract** — the main agent submits a validated DAG (`workbench_submit_plan`) with owners, stages, dependencies and acceptance criteria; invalid plans are rejected with every issue at once.
 - **Dispatch loop** — one round at a time: ready cards go to child agents with a complete prompt, results come back through `workbench_report_work`.
 - **Evidence-gated completion** — a card is done only with a real exit code, a positive pass count and zero failures; anything else lands on a person.
@@ -25,9 +26,15 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 - **Voice input** — record in the browser, transcribe on the host through DSH's shared speech-to-text service, insert the text into the draft.
 - **Automatic accounting and circuit breakers** — tokens per job, optional USD budget, stall watchdog, round trip-breaker and a hard planning timeout, each exception as a human gate.
 
-| Requirement upload | Team flow |
+| New task: requirement + skill pool | Skill picker |
 |---|---|
-| ![New task with an attached requirement document](docs/assets/task.png) | ![Team flow graph](docs/assets/flow.png) |
+| ![New task dialog with the skill row](docs/assets/task.png) | ![Skill picker with recommended and installed skills](docs/assets/skills.png) |
+
+| Task list with skill chips | Cockpit |
+|---|---|
+| ![Task cards showing the selected skills and the edit entry](docs/assets/tasks.png) | ![Cockpit: team graph, HUD panels and the skill badge](docs/assets/flow.png) |
+
+![Card detail: required skills vs skills actually used](docs/assets/card-detail.png)
 
 ![Task session chat](docs/assets/chat.png)
 
@@ -95,7 +102,11 @@ profile on the project line and `profiles.js` resolves it:
 
 ## Plan protocol
 
-`workbench_submit_plan({ jobId, brief, roles?, design?, tasks:[{ id, title, owner, stage, blockedBy?, instructions?, acceptance?, skill? }] })`
+`workbench_submit_plan({ jobId, brief, roles?, design?, tasks:[{ id, title, owner, stage, blockedBy?, instructions?, acceptance?, skill?, skills? }] })`
+
+- `skills` assigns execution skills to that card (≤6 strings). If the job skill pool contains
+  execution/general skills, the plan is rejected until every one of them appears in at least one
+  card's `skills` array, so a pool can never be silently dropped.
 
 - `tasks` non-empty (≤200), ids unique (`[A-Za-z0-9][A-Za-z0-9._-]*`, ≤64), titles ≤200, text ≤4000.
 - `blockedBy` may only reference ids in the same plan, ≤32 blockers, no cycles.
@@ -108,9 +119,11 @@ profile on the project line and `profiles.js` resolves it:
 
 Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 
-- the **new-task dialog** carries a skill pool (recommended skills preselected, installed catalog
-  searchable, up to 6; market-only entries may be selected and are gated at planning). The pool
-  can be changed before the plan from the task card or the cockpit; afterwards it is read-only;
+- the **new-task dialog** carries a skill pool: recommended skills are preselected, the installed
+  catalog is searchable with a planning / execution / general class label, market-only entries are
+  shown as *not installed*, and the selection is capped at 6. The pool can be changed before the plan
+  from the task card (`✎ 修改技能`) or the cockpit (`🎯 技能 n`); afterwards the job-skills route answers
+  `409 already-planned`;
 - the delivery session is woken with its **project preset** (`workbench-software`/`workbench-copy`),
   never the deployment default: a wake used to re-select the default and silently downgrade the
   session to `standard`;
@@ -234,6 +247,8 @@ All routes are same-origin and sit behind the host connection fence.
 | `/workbench/control` | POST | `pause` / `resume` / `cancel` for a project or one job |
 | `/workbench/decide` | POST | approve / reject a gate |
 | `/workbench/job-config` | POST | job title / workspace / workspaceId / sessionId |
+| `/workbench/skills` | GET | installed skill catalog + project-kind recommendations + optional market search (`?q=`) |
+| `/workbench/job-skills` | POST | replace a job's skill pool before its plan (`409` afterwards) |
 | `/workbench/project-config` | POST | legacy project workspace binding |
 | `/workbench/task` | POST | manual task progress/evidence (the report tool writes events directly) |
 | `/workbench/transcribe` | POST | proxy audio to the host speech-to-text service |
@@ -307,7 +322,7 @@ repository: this repository publishes the generic workbench only.
 ## Development
 
 ```bash
-cd packages/workbench && node --test tests/*.test.mjs   # 233 tests
+cd packages/workbench && node --test tests/*.test.mjs   # 278 tests
 cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 ```
 
@@ -331,6 +346,12 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - Capability profiles apply when a delivery session is created (and its tool mask
   when the session is first prepared). An existing session keeps its composition;
   start a new project to change type, or edit the preset in the profile.
+- A **deployment** may enable bundles whose tools are registered globally
+  (agent-team, computer-use, desktop). A preset cannot remove those rows from the
+  header, so a child's visible tool count stays high on such a host; the plugin's
+  runtime deny mask still refuses the calls, and the `workbench-child` preset
+  removes everything the preset controls. An isolated profile is the only way to
+  shrink the header itself; the desktop app is hard-wired to its `desktop` profile.
 - The preset's delegation rows use workbench-unique ids (`workbench-tool-spawn`,
   `workbench-tool-subagent-control`, `workbench-tool-subagent-list-agents`): the
   experimental agent-team bundle overrides the generic `tool-subagent*` ids, which
@@ -344,11 +365,13 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 - The tool mask covers the delivery session and each child agent:
   `workbench_bind_child` applies the project deny list to the child's own tool
   scope (children do not inherit their parent's restriction), and a cold resume
-  re-applies it before the continue message. Preset-mounted tools are not
-  removable by that mask, so since 0.5.0 every card child is spawned with the
-  lean `workbench-child` preset (no delegation, no team surface, no desktop
-  automation) and the delegation group no longer offers a fork tool. The skill
-  catalog is still shared.
+  re-applies it before the continue message. The mask is an **invocation gate**:
+  a card child that calls a denied team/desktop tool gets
+  `Error: unknown tool "spawn_teammate"` / `cua_driver_native__…`, verified live,
+  even when the deployment registers those tools globally. Since 0.5.0 every
+  card child is also spawned with the lean `workbench-child` preset (no
+  delegation, no team surface, no desktop automation), and the delegation group
+  no longer offers a fork tool. The skill catalog is still shared.
 - A claim is a lease (`claimLeaseMs`, default 10 min). A host restart loses the
   child that held a card; once the lease expires the card is offered again with a
   prompt that says to check the workspace before redoing the work. The dispatcher
