@@ -499,10 +499,12 @@ test('interrupting a child cancels its turn through the session controller', asy
 
 test('continuing a child prompts the same session with the continue text', async () => {
   const calls = []
+  const signals = []
   const ctx = fakeCtx({
     sessionController: {
-      async prompt(request) {
+      async prompt(request, signal) {
         calls.push(request)
+        signals.push(signal)
         return { accepted: true }
       },
     },
@@ -514,4 +516,5 @@ test('continuing a child prompts the same session with the continue text', async
   assert.equal(calls[0].mode, 'queue')
   assert.equal(calls[0].content[0].text, 'continue the card')
   assert.equal(typeof calls[0].requestId, 'string')
+  assert.equal(typeof signals[0]?.throwIfAborted, 'function', 'prompt receives an AbortSignal')
 })

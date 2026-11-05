@@ -1288,3 +1288,36 @@ test('pausing a job with bound children records a checkpoint and cancels the chi
 })
 
 
+
+test('a child bound while its job is paused is stopped immediately', async () => {
+  await withDataDir(async dataDir => {
+    const calls = { cancel: [], prompt: [] }
+    const { ctx, tools, routes } = fakeContext({
+      services: {
+        sessionController: {
+          async cancel({ sessionId }) { calls.cancel.push(sessionId); return { accepted: true } },
+          async prompt(request) { calls.prompt.push(request); return { accepted: true } },
+        },
+      },
+    })
+    apply(ctx, { dataDir })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+    await log.append(taskEvent({
+      event: 'created', taskId: 'j1:wi:a', projectId: 'p1', jobId: 'j1',
+      stage: 'build', owner: 'backend', title: '契约', ts: '2026-11-05T00:00:02.000Z',
+    }))
+
+    const control = routes.find(route => route.path === CONTROL_PATH)
+    await control.handler(postRequest({ projectId: 'p1', jobId: 'j1', action: 'pause' }), fakeResponse())
+    // Pause ran before the child id was known; the binding arrives afterwards.
+    const bind = tools.find(tool => tool.name === 'workbench_bind_child')
+    const bound = JSON.parse(await bind.execute({ taskId: 'j1:wi:a', childSessionId: 'child-9' }))
+    assert.equal(bound.paused, true)
+    assert.deepEqual(calls.cancel, ['child-9'], 'the late child is cancelled right away')
+    const lines = await createEventLog(join(dataDir, 'events.jsonl')).all()
+    const note = lines.filter(item => item.kind === 'task' && item.event === 'progress' && item.taskId === 'j1:wi:a').at(-1)
+    assert.match(note.notes, /bound after pause/)
+  })
+})

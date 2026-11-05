@@ -398,12 +398,15 @@ export function createSessionBridge({ ctx, config, events, now = Date.now }) {
       return { ok: false, error: 'sessionController.prompt unavailable' }
     }
     try {
+      // prompt(request, signal): the host implementation dereferences the
+      // signal, so omitting it fails with "throwIfAborted of undefined".
+      const abort = new AbortController()
       const receipt = await controller.prompt({
         requestId: randomUUID(),
         sessionId,
         mode: 'queue',
         content: [{ type: 'text', text: String(text) }],
-      })
+      }, abort.signal)
       return { ok: receipt?.accepted === true, via: 'session-controller' }
     } catch (error) {
       return { ok: false, error: `continue failed: ${String(error?.message ?? error)}` }

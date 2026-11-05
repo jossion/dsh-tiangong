@@ -1808,7 +1808,26 @@ export function apply(ctx, row) {
           jobId: target.jobId ?? (typeof input?.jobId === 'string' && input.jobId !== '' ? input.jobId : null),
           ts: new Date().toISOString(),
         }))
-        return JSON.stringify({ ok: true, taskId, childSessionId })
+        // Pause can race the spawn: the card is claimed before the child id is
+        // known, so the pause pass saw no child to stop. Now that it is bound,
+        // stop it if its scope is paused — otherwise "paused" keeps spending.
+        const scopeProject = board.projects.find(item => item.id === target.projectId)
+        const scopeJob = scopeProject?.jobs?.find(item => item.id === target.jobId)
+        const paused = (scopeJob?.status ?? scopeProject?.status) === 'paused'
+        if (paused) {
+          const stopped = await sessionBridge.interruptChild(childSessionId)
+          await events.append(taskEvent({
+            event: 'progress',
+            taskId,
+            projectId: target.projectId ?? null,
+            jobId: target.jobId ?? null,
+            ts: new Date().toISOString(),
+            notes: stopped.ok
+              ? `paused; child session ${childSessionId} interrupted (bound after pause)`
+              : `paused; child session ${childSessionId} could not be interrupted (${stopped.error})`,
+          }))
+        }
+        return JSON.stringify({ ok: true, taskId, childSessionId, ...(paused ? { paused: true } : {}) })
       },
     }),
   )

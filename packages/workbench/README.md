@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.4.4`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.4.5`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -115,9 +115,13 @@ Pause is not only a queue switch. Every card handed out with a bound child sessi
   intact. This does not go through a model tool: in a team deployment the delivery
   lead's `interrupt_agent` resolves teammates, not children.
 - **Resume** prompts the same child session with `sessionController.prompt`
-  ("continue, do not restart the card"); a cold child is resumed from
-  persistence, so resume also works after a host restart. The card is not
-  re-executed from its prompt.
+  ("continue, do not restart the card"), passing the AbortSignal the host
+  requires; a cold child is resumed from persistence, so resume also works after
+  a host restart. The card is not re-executed from its prompt.
+- Pause can race the spawn: the card is claimed before its child id exists. When
+  `workbench_bind_child` runs while the job is paused, the plugin stops that
+  child immediately and records the checkpoint, so a paused job cannot keep
+  spending through a child bound a moment too late.
 - Repeated pause/resume does not re-message children (the route compares the
   state before the write), and cards whose children finished while paused are not
   addressed again.
