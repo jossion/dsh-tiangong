@@ -79,6 +79,10 @@ function factsOf(store, jobId) {
       planning: false,
       planningSince: null,
       planNudges: 0,
+      // A hard planning timeout is a stop signal, not a retry trigger: without
+      // this the loop re-sent the whole planning directive every planTimeoutMs
+      // (each one a fresh expensive turn) until the plan happened to arrive.
+      planTimedOut: false,
       delivered: false,
       agentStatus: 'idle',
       usageAt: 0,
@@ -180,7 +184,10 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
 
   async function execute(action, { board, project, job }) {
     const facts = factsOf(runtime, job.id)
-    if (job.planBy !== null && job.planBy !== undefined) facts.planning = false
+    if (job.planBy !== null && job.planBy !== undefined) {
+      facts.planning = false
+      facts.planTimedOut = false
+    }
 
     switch (action.action) {
       case 'bind-session': {
@@ -219,9 +226,16 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
         project.workspace = bound.workspace ?? project.workspace
         project.workspaceId = bound.workspaceId ?? project.workspaceId
         job.sessionId = bound.sessionId
+        // A newly bound session is a clean planning attempt; an existing one
+        // keeps the timeout verdict.
+        if (bound.created === true) facts.planTimedOut = false
         return
       }
       case 'start-planning': {
+        // The hard timeout already handed this job to a person. Wait for the
+        // late plan to arrive (a plan event clears the flag) or for a person to
+        // decide; do not spend another planning turn every five minutes.
+        if (facts.planTimedOut === true) return
         if (job.requirement === null || job.requirement === undefined || String(job.requirement.text ?? '').trim() === '') {
           await gate(project, job, 'missing-requirement')
           return
@@ -235,6 +249,7 @@ export function createDispatcher({ ctx, config, events, sessions, now = () => Da
       }
       case 'plan-timeout': {
         facts.planning = false
+        facts.planTimedOut = true
         await gate(project, job, 'plan-timeout', 'the planning turn did not submit a plan in time')
         return
       }

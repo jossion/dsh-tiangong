@@ -2316,13 +2316,25 @@ window.__ModuleLoader__.load({
 
       // Workspace first: a conversation belongs to a DSH workspace, so the id
       // is resolved (and stored) before any session is listed or created.
+      //
+      // `onConfig` is an inline callback in the cockpit, so this effect re-runs
+      // on every render. Resolving again each time posted one job-config event
+      // per render (observed: 35 events inside 160 ms at job creation), so the
+      // attempt is remembered per path and only a failure clears it.
+      const resolveAttempted = useRef(null)
       useEffect(() => {
         if (!workspace || workspaceId || !bridge || !bridge.available()) return undefined
+        if (resolveAttempted.current === workspace) return undefined
+        resolveAttempted.current = workspace
         let live = true
         setWorkspaceBusy(true)
         bridge.resolveWorkspace(workspace)
           .then(id => { if (live && id) return onConfig({ workspaceId: id }) })
-          .catch(failure => { if (live) setError(String(failure?.message ?? failure)) })
+          .catch(failure => {
+            if (!live) return
+            resolveAttempted.current = null
+            setError(String(failure?.message ?? failure))
+          })
           .finally(() => { if (live) setWorkspaceBusy(false) })
         return () => { live = false }
       }, [workspace, workspaceId, bridge, onConfig])

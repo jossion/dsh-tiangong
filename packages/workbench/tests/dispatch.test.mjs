@@ -332,3 +332,37 @@ test('a change-request planning round names the job it follows', () => {
   assert.match(text, /j0/)
   assert.match(text, /员工管理/)
 })
+
+test('a planning timeout parks the job instead of restarting planning forever', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    const sessions = fakeSessions()
+    let clock = 1_000_000
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, planNudgeMs: 60_000, planTimeoutMs: 300_000 },
+      events: log,
+      sessions,
+      now: () => clock,
+    })
+
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'planning is woken once')
+
+    clock += 301_000
+    await dispatcher.tick()
+    clock += 10_000
+    await dispatcher.tick()
+    clock += 301_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'a timed-out planning turn is not restarted every timeout')
+
+    // A plan that arrives late still resumes the loop.
+    await seedPlan(log)
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 2, 'the late plan resumes dispatch')
+    assert.match(sessions.calls.wake[1].text, /workbench_next_work/)
+  })
+})

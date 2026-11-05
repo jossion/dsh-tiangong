@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.3.3`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.3.4`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -40,7 +40,7 @@ decision (`orchestrator.nextStep`), and the ledger is the only source of truth.
 |---|---|---|
 | `bind-session` | a job has no delivery session | host: create/resume one session per project |
 | `start-planning` | no plan yet, no planning turn in flight | host: wake the main agent with the planning directive |
-| `plan-timeout` | planning exceeded `planTimeoutMs` (default **5 min**) | host: human gate |
+| `plan-timeout` | planning exceeded `planTimeoutMs` (default **5 min**) | host: human gate, then **parks** the job |
 | `wake` | ready cards and an idle main agent | host: wake with the dispatch round |
 | `wait` | planning / working / cooldown / dependencies | scheduler: wait for the next event |
 | `human-gate` | blocking approval, failure, too many rounds, budget | panel: “等你决定” |
@@ -256,7 +256,11 @@ cd packages/company   && node --test tests/*.test.mjs   # 60 tests
 ## Known limitations
 
 - Planning timeout is a hard gate: a very large requirement may need a higher `planTimeoutMs` (or a
-  `diagnose` card) rather than a longer planning turn.
+  `diagnose` card) rather than a longer planning turn. A timeout parks the job instead of restarting
+  the planning turn, and a plan that arrives late still resumes dispatch.
+- One delivery session is reused by every job in a project, so the planning turn inherits the whole
+  history (observed: ~186k input tokens before a second job's plan). Long projects want session
+  rotation with a handoff note; until then raise `planTimeoutMs` while the session is large.
 - The dispatcher only auto-drives jobs created through `/workbench/requirements`. Jobs created by the
   legacy `/workbench/start` route (or `workbench_plan_software`) are planned host-side and executed
   manually via the cockpit’s “开始执行”, which only shows for those jobs.
