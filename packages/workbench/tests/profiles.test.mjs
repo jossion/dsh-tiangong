@@ -36,3 +36,11 @@ test('copy also masks shell tools when they are global', () => {
   const filter = toolFilterFor(resolveProjectProfile('copy'), ['bash', 'pwsh', 'blender_render', 'workbench_state'])
   assert.deepEqual(filter.deny.sort(), ['bash', 'blender_render', 'pwsh'].sort())
 })
+
+test('each project kind recommends skills that are resolved without inventing any', async () => {
+  const { recommendedSkillsFor } = await import('../profiles.js')
+  assert.ok(recommendedSkillsFor(resolveProjectProfile('software')).includes('create-implementation-plan'))
+  assert.deepEqual(recommendedSkillsFor(resolveProjectProfile('copy')), ['documentation-writer'])
+  assert.deepEqual(recommendedSkillsFor(resolveProjectProfile('custom')), [])
+  assert.deepEqual(recommendedSkillsFor(null), [])
+})

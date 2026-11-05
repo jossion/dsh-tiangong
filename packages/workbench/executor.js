@@ -57,8 +57,9 @@ export function workItemPrompt({ project, task, siblingTitles = [], stale = fals
   }
   lines.push(
     '',
-    'Skills: before starting, call workbench_find_skill for this card and load the matching skill',
-    'with the skill tool. Name the skills you loaded in your final report.',
+    `Skills: before starting, call workbench_find_skill({ projectId: ${JSON.stringify(project?.id ?? '')}, query: <this card> })`,
+    'and load the matching installed skill with the skill tool. Name the skills you loaded in your final',
+    'report. If a skill the card requires is not installed, say so instead of pretending to load it.',
   )
   if (dir) {
     lines.push(

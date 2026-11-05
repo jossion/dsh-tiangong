@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.6.0`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.7.0`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -109,6 +109,12 @@ profile on the project line and `profiles.js` resolves it:
 Card children had a 60-skill catalog injected but never loaded one. Since 0.6.0:
 
 - planning requires `workbench_find_skill` plus the `skill` tool before submitting a plan;
+- `workbench_find_skill` also compares the project kind's **recommended skills** (software:
+  `create-implementation-plan`, `review-and-refactor`; copy: `documentation-writer`) and any
+  **required** skill names the requirement explicitly demands against the installed catalog.
+  A missing name is reported in `availability.missing`; an essential one must be raised with
+  `ask_user` (install it or approve a fallback), an optional one is stated as a fallback in
+  the plan. Nothing is installed or pretended;
 - every card prompt tells the child to discover and load its skill and to name it in the report;
 - the host observes the `skill` tool-result event, maps the calling agent to its card through
   `childSessionId`, and appends a `skill` task event (deduplicated);

@@ -37,18 +37,24 @@ export const DEFAULT_PROFILES = {
     preset: 'workbench-software',
     template: 'software',
     tools: { prefixes: HEAVY_PREFIXES, names: TEAM_TOOLS },
+    // Skills the planner should prefer for this project type. They are loaded
+    // only when this deployment actually has them; a missing one is reported,
+    // never invented.
+    skills: ['create-implementation-plan', 'review-and-refactor'],
   },
   copy: {
     kind: 'copy',
     preset: 'workbench-copy',
     template: 'copy',
     tools: { prefixes: HEAVY_PREFIXES, names: [...TEAM_TOOLS, 'bash', 'pwsh'] },
+    skills: ['documentation-writer'],
   },
   custom: {
     kind: 'custom',
     preset: null,
     template: 'custom',
     tools: null,
+    skills: [],
   },
 }
 
@@ -59,6 +65,12 @@ export function normalizeProjectKind(value) {
 }
 
 /** The normalized profile for one kind (a copy: callers keep it in the ledger). */
+export function recommendedSkillsFor(profile) {
+  if (profile === null || profile === undefined) return []
+  const list = Array.isArray(profile.skills) ? profile.skills : []
+  return list.map(item => String(item ?? '').trim()).filter(item => item !== '')
+}
+
 export function resolveProjectProfile(kind) {
   const key = normalizeProjectKind(kind)
   const profile = DEFAULT_PROFILES[key]

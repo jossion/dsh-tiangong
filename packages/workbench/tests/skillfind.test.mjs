@@ -101,3 +101,21 @@ test('the tool result separates use-now from install-first', () => {
   assert.ok(parsed.howToUse.length >= 2)
   assert.match(parsed.howToUse.join(' '), /install/i)
 })
+
+test('availability separates installed recommendations from missing requirements', async () => {
+  const { skillAvailability } = await import('../skillfind.js')
+  const result = skillAvailability(
+    ['create-implementation-plan', 'office'],
+    ['create-implementation-plan', 'review-and-refactor'],
+    ['office', 'not-installed-skill'],
+  )
+  assert.deepEqual(result.recommended, [
+    { name: 'create-implementation-plan', installed: true },
+    { name: 'review-and-refactor', installed: false },
+  ])
+  assert.deepEqual(result.required, [
+    { name: 'office', installed: true },
+    { name: 'not-installed-skill', installed: false },
+  ])
+  assert.deepEqual(result.missing, ['review-and-refactor', 'not-installed-skill'])
+})

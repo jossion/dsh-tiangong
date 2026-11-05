@@ -27,10 +27,10 @@ import { artifactEvent, buildBoard, foldTasks, jobEvent, projectEvent, requireme
 import { readyWork, reportEvents } from './executor.js'
 import { PlanError, assertPlan, buildCardId, planEvents } from './planner.js'
 import { RequirementError, assertRequirement, storeRequirement } from './requirements.js'
-import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills } from './skillfind.js'
+import { SKILL_LIMITS, formatSkillResult, marketCandidates, rankSkills, skillAvailability } from './skillfind.js'
 import { createSessionBridge } from './sessions.js'
 import { createDispatcher } from './dispatch.js'
-import { PROJECT_KINDS, resolveProjectProfile } from './profiles.js'
+import { PROJECT_KINDS, recommendedSkillsFor, resolveProjectProfile } from './profiles.js'
 
 export const inject = ['llm', 'tools']
 
@@ -1604,6 +1604,12 @@ export function apply(ctx, row) {
         properties: {
           query: { type: 'string', description: 'What the work is about, e.g. "database migration" or "报价单 PRD".' },
           taskId: { type: 'string', description: 'Optional work item id; recorded with the lookup.' },
+          projectId: { type: 'string', description: 'Project id; resolves the recommended skills for the project kind.' },
+          required: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Skill names the requirement explicitly demands; each is reported as installed or missing.',
+          },
           includeMarket: { type: 'boolean', description: 'Search the plugin market too (default true).' },
         },
         required: ['query'],
@@ -1625,14 +1631,45 @@ export function apply(ctx, row) {
         }
 
         let session = []
+        let catalog = []
         const skillsService = optional('skills')
         if (skillsService && typeof skillsService.list === 'function') {
           try {
-            session = rankSkills(await skillsService.list({}), query)
+            catalog = await skillsService.list({})
+            session = rankSkills(catalog, query)
           } catch {
+            catalog = []
             session = []
           }
         }
+
+        // Recommended / required skills are compared against what this
+        // deployment actually has; nothing is installed or invented here.
+        const taskId = String(input?.taskId ?? '').trim()
+        const board = buildBoard(await events.all())
+        const findProjectOfTask = id => {
+          for (const project of board.projects) {
+            for (const job of project.jobs ?? []) {
+              const stack = [...(job.roots ?? [])]
+              while (stack.length > 0) {
+                const node = stack.pop()
+                if (node.id === id) return project
+                stack.push(...(node.children ?? []))
+              }
+            }
+          }
+          return null
+        }
+        const wantedProject = String(input?.projectId ?? '').trim()
+        const project = wantedProject !== ''
+          ? (board.projects.find(item => item.id === wantedProject) ?? null)
+          : (taskId !== '' ? findProjectOfTask(taskId) : (board.projects[0] ?? null))
+        const profile = project?.profile ?? resolveProjectProfile(project?.projectKind ?? 'custom')
+        const recommended = recommendedSkillsFor(profile)
+        const required = Array.isArray(input?.required)
+          ? input.required.map(name => String(name ?? '').trim()).filter(name => name !== '')
+          : []
+        const availability = skillAvailability((Array.isArray(catalog) ? catalog : []).map(skill => skill?.name), recommended, required)
 
         const market = []
         const marketErrors = []
@@ -1665,7 +1702,6 @@ export function apply(ctx, row) {
           }
         }
 
-        const taskId = String(input?.taskId ?? '').trim()
         if (taskId !== '') {
           try {
             await events.append({
@@ -1673,6 +1709,7 @@ export function apply(ctx, row) {
               taskId,
               query,
               session: session.map(item => item.name),
+              missing: availability.missing,
               market: market.flatMap(entry => entry.entries.map(item => item.name)),
               ts: new Date().toISOString(),
             })
@@ -1680,7 +1717,7 @@ export function apply(ctx, row) {
             /* the lookup must not fail because its audit line could not be written */
           }
         }
-        return formatSkillResult({ query, session, market, marketErrors })
+        return formatSkillResult({ query, session, market, marketErrors, availability, projectKind: profile?.kind ?? null })
       },
     }),
   )

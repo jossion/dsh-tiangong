@@ -98,6 +98,24 @@ export function rankSkills(skills, query, { limit = SKILL_LIMITS.maxCandidates }
   return ranked.slice(0, page)
 }
 
+/**
+ * Compare the skills a plan would like with the skills this deployment has.
+ *
+ * Nothing here loads or installs anything: the result only says which names are
+ * present. `required` is what the requirement explicitly demands; `recommended`
+ * is the project type's default list. A missing name is reported to the planner,
+ * which must decide between asking a person to install it and a stated fallback.
+ */
+export function skillAvailability(installedNames = [], recommended = [], required = []) {
+  const installed = new Set((Array.isArray(installedNames) ? installedNames : []).map(name => String(name ?? '').trim()).filter(Boolean))
+  const status = list => [...new Set((Array.isArray(list) ? list : []).map(name => String(name ?? '').trim()).filter(Boolean))]
+    .map(name => ({ name, installed: installed.has(name) }))
+  const recommendedStatus = status(recommended)
+  const requiredStatus = status(required)
+  const missing = [...new Set([...recommendedStatus, ...requiredStatus].filter(item => !item.installed).map(item => item.name))]
+  return { recommended: recommendedStatus, required: requiredStatus, missing }
+}
+
 /** Map one market search result page to the small shape the agent needs. */
 export function marketCandidates(entries, { limit = SKILL_LIMITS.maxMarketEntries } = {}) {
   const list = Array.isArray(entries) ? entries : []
@@ -121,16 +139,21 @@ export function marketCandidates(entries, { limit = SKILL_LIMITS.maxMarketEntrie
  * The tool result. It separates "use it now" from "install first" so the agent
  * does not try to invoke a market plugin that is not installed yet.
  */
-export function formatSkillResult({ query, session = [], market = [], marketErrors = [], limitNote = null }) {
+export function formatSkillResult({ query, session = [], market = [], marketErrors = [], limitNote = null, availability = null, projectKind = null }) {
   return JSON.stringify({
     query,
+    ...(projectKind === null ? {} : { projectKind }),
     sessionSkills: session,
+    ...(availability === null ? {} : { availability }),
     market,
     marketErrors,
     ...(limitNote === null ? {} : { note: limitNote }),
     howToUse: [
       'Use a session skill now: load it through your normal skill mechanism before starting the work.',
       'A market entry is not installed: pass the plugin to plugin-manager install (a person approves it), then use the skill it provides.',
+      ...(availability !== null && Array.isArray(availability.missing) && availability.missing.length > 0
+        ? [`Missing skills: ${availability.missing.join(', ')}. If one is essential, ask the owner with ask_user before planning; otherwise state the fallback in the plan and card instructions instead of pretending to load it.`]
+        : []),
       'If neither helps, continue with your own judgement and report the missing skill in workbench_report_work notes.',
     ],
   })

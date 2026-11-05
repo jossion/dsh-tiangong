@@ -1430,3 +1430,32 @@ test('a report can name the skills the child loaded', async () => {
     assert.equal(skill.taskId, 'j1:wi:a')
   })
 })
+
+test('workbench_find_skill reports recommended and missing skills for a project', async () => {
+  await withDataDir(async dataDir => {
+    const skills = {
+      list: async () => [
+        { name: 'create-implementation-plan', description: 'plan implementation', whenToUse: 'feature work' },
+        { name: 'office', description: 'office documents', whenToUse: 'documents' },
+      ],
+    }
+    const { ctx, tools } = fakeContext({ services: { skills } })
+    apply(ctx, { dataDir, autoRun: false })
+    const log = createEventLog(join(dataDir, 'events.jsonl'))
+    await log.append(projectEvent({ projectId: 'p1', title: '量化', projectKind: 'software', ts: '2026-11-05T00:00:00.000Z' }))
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', title: '二期', sessionId: 's1', ts: '2026-11-05T00:00:01.000Z' }))
+
+    const find = tools.find(tool => tool.name === 'workbench_find_skill')
+    const result = JSON.parse(await find.execute({
+      query: 'python tiny utility',
+      projectId: 'p1',
+      required: ['office', 'not-installed-skill'],
+      includeMarket: false,
+    }))
+    assert.equal(result.projectKind, 'software')
+    assert.ok(result.availability.recommended.some(item => item.name === 'create-implementation-plan' && item.installed === true))
+    assert.ok(result.availability.required.some(item => item.name === 'not-installed-skill' && item.installed === false))
+    assert.ok(result.availability.missing.includes('not-installed-skill'))
+    assert.ok(result.howToUse.some(line => /Missing skills/.test(line)))
+  })
+})
