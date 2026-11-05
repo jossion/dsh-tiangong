@@ -62,6 +62,8 @@ export function wakeText({ job, work }) {
     '3. when a child returns, call workbench_report_work with that id, its real files and its test evidence; a card is done only with green tests',
     '4. repeat until workbench_next_work returns no work, then stop and summarize in one paragraph',
     '',
+    'One dispatch round per wake: if a card from this list is already in flight from an earlier',
+    'wake, do not spawn it again — report it when that child returns.',
     'Do not implement cards yourself and never mark a card done without test evidence.',
     'Do not run the project test suite yourself and do not wait on long test commands: the child',
     'agent runs its own tests and reports the exit code, pass count and failures.',

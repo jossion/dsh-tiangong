@@ -145,7 +145,7 @@ test('a legacy job whose cards predate the plan marker is treated as planned', (
 test('ready work wakes an idle agent once the cooldown passed', () => {
   const action = nextStep(snapshot({
     job: { roots: [task('a'), task('b', { stage: 'verify' })] },
-    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 10_000 },
+    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 20_000 },
   }))
   assert.equal(action.action, 'wake')
   assert.deepEqual(action.readyIds, ['a', 'b'])
@@ -178,7 +178,7 @@ test('a blocking approval gates only when nothing else is dispatchable', () => {
 
   const withSibling = nextStep(snapshot({
     job: { roots: [task('a'), task('b')], gates: [{ taskId: 'a', kind: 'approval', status: 'requested' }] },
-    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 10_000 },
+    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 20_000 },
   }))
   assert.equal(withSibling.action, 'wake')
   assert.deepEqual(withSibling.readyIds, ['b'])
@@ -187,7 +187,7 @@ test('a blocking approval gates only when nothing else is dispatchable', () => {
 test('an advisory decision never blocks the queue', () => {
   const action = nextStep(snapshot({
     job: { roots: [task('a')], gates: [{ taskId: 'a', kind: 'decision', status: 'requested' }] },
-    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 10_000 },
+    runtime: { agentStatus: 'idle', lastWakeAt: NOW - 20_000 },
   }))
   assert.equal(action.action, 'wake')
 })

@@ -16,7 +16,7 @@ export const DEFAULT_LOOP = {
   /** Turn the whole automatic loop off (manual dispatch only). */
   autoRun: true,
   /** A successful wake must not be repeated before the agent had a chance to act. */
-  wakeCooldownMs: 4000,
+  wakeCooldownMs: 15000,
   /** A planning turn that never submits a plan falls back after this. */
   planTimeoutMs: 5 * 60 * 1000,
   /** Wake rounds are the loop's trip counter; beyond it a person takes over. */

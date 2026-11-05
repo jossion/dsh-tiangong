@@ -366,3 +366,30 @@ test('a planning timeout parks the job instead of restarting planning forever', 
     assert.match(sessions.calls.wake[1].text, /workbench_next_work/)
   })
 })
+
+test('one wake per cooldown, so the same ready card cannot be handed out twice', async () => {
+  await withDir(async dir => {
+    const log = createEventLog(join(dir, 'events.jsonl'))
+    await seedIntake(log)
+    await seedPlan(log)
+    await log.append(jobEvent({ projectId: 'p1', jobId: 'j1', event: 'config', sessionId: 'sess-1' }))
+    const sessions = fakeSessions()
+    let clock = 1_000_000
+    const dispatcher = createDispatcher({
+      ctx: silentCtx,
+      config: { ...config, dataDir: dir, wakeCooldownMs: 15_000 },
+      events: log, sessions, now: () => clock,
+    })
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'the ready card is woken once')
+    assert.match(sessions.calls.wake[0].text, /workbench_next_work/)
+
+    clock += 4_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 1, 'a spawn that is still starting is not woken again after 4s')
+
+    clock += 12_000
+    await dispatcher.tick()
+    assert.equal(sessions.calls.wake.length, 2, 'after the cooldown a new round is allowed')
+  })
+})

@@ -9,7 +9,7 @@ ledger. Every task keeps its own cockpit; the delivered result stays auditable.
 
 ![Task board](docs/assets/board.png)
 
-> Capability inventory below is current as of **2026-11-04** (workbench `0.3.4`).
+> Capability inventory below is current as of **2026-11-04** (workbench `0.3.5`).
 > 中文用户手册：[docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 ## What it does
@@ -199,7 +199,7 @@ All routes are same-origin and sit behind the host connection fence.
 | `agentPreset` | `""` | Agent preset for delivery sessions; empty uses the deployment default |
 | `provider` / `model` | `""` | Route for the legacy host-side planner; empty uses the deployment default |
 | `autoRun` | `true` | Drive intake-created jobs automatically |
-| `wakeCooldownMs` | `4000` | Minimum gap between two wakes |
+| `wakeCooldownMs` | `15000` | Minimum gap between two wakes; 4 s was short enough that the same ready card was woken twice while a spawn was starting |
 | `planTimeoutMs` | `300000` | Planning turn hard stop → human gate |
 | `planNudgeMs` | `120000` | One steer reminder during planning |
 | `maxRounds` | `60` | Wake-round trip-breaker per job |
